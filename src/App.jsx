@@ -6,6 +6,7 @@ import DashboardLayout from './layouts/DashboardLayout'
 import Habits from './pages/Habits'
 import Pomodoro from './pages/Pomodoro'
 import DashboardPage from './pages/Dashboard'
+import Todos from './pages/Todos'
 
 function ProtectedRoute({ session, children }) {
   const location = useLocation()
