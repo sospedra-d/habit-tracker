@@ -192,6 +192,7 @@ export default function Todos() {
       setIsFormExpanded(false)
     } catch (err) {
       console.error('Error adding todo:', err)
+      alert('Error al guardar la tarea en la base de datos: ' + err.message + '\n\n¿Ejecutaste el comando SQL de energy_level correctamente?')
     }
   }
 
