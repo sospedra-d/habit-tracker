@@ -160,11 +160,6 @@ export default function Habits() {
     setModalOpen(true)
   }
 
-  const openCreate = () => {
-    setEditingHabit(null)
-    setModalOpen(true)
-  }
-
   // Global Stats
   const getHabitProgress = (h) => {
     const log = logsMap.get(h.id)
@@ -181,7 +176,6 @@ export default function Habits() {
 
   return (
     <div className="animate-fade-in-up max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 mt-4">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-3xl font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>
@@ -191,19 +185,6 @@ export default function Habits() {
             Hoy es <span style={{ color: 'var(--accent-primary)' }}>{todayLabel}</span>
           </p>
         </div>
-        <button
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl text-white text-sm font-bold transition-all duration-300 hover:scale-105 hover:shadow-lg active:scale-95 cursor-pointer shrink-0"
-          style={{
-            background: 'var(--accent-gradient)',
-            boxShadow: '0 8px 25px rgba(244, 63, 94, 0.3)', // Red shadow
-          }}
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Nuevo Hábito
-        </button>
       </div>
 
       {/* Global Progress Hero Board */}
@@ -310,16 +291,9 @@ export default function Habits() {
           </h3>
           <p className="text-sm mb-8 max-w-sm mx-auto" style={{ color: 'var(--text-secondary)' }}>
             {showAllHabits
-              ? 'Empieza creando tu primer hábito para construir una mejor rutina.'
+              ? 'Empieza creando tu primer hábito en el panel de la derecha para construir una mejor rutina.'
               : 'Disfruta tu día libre o cambia al filtro "Todos" para editar tu semana.'}
           </p>
-          <button
-            onClick={openCreate}
-            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-2xl text-white text-sm font-bold transition-all duration-300 hover:scale-105 hover:shadow-lg active:scale-95 cursor-pointer"
-            style={{ background: 'var(--accent-gradient)', boxShadow: '0 8px 25px rgba(244, 63, 94, 0.3)' }}
-          >
-            Crear tu primer hábito
-          </button>
         </div>
       )}
 

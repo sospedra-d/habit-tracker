@@ -74,6 +74,12 @@ export default function DashboardLayout() {
   const [qhCategory, setQhCategory] = useState('Salud')
   const [qhIsCounter, setQhIsCounter] = useState(false)
   const [qhTarget, setQhTarget] = useState(1)
+  const [qhDays, setQhDays] = useState([0, 1, 2, 3, 4, 5, 6])
+  
+  const dayLabels = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
+  const toggleDay = (dIdx) => {
+    setQhDays(prev => prev.includes(dIdx) ? prev.filter(d => d !== dIdx) : [...prev, dIdx].sort())
+  }
 
   // -- Energy Widget State (Hoy)
   const [energySelector, setEnergySelector] = useState(null)
@@ -124,7 +130,7 @@ export default function DashboardLayout() {
       const payload = {
         name: qhName.trim(),
         category: qhCategory,
-        days_of_week: [0, 1, 2, 3, 4, 5, 6], // default all week for quick add
+        days_of_week: qhDays.length > 0 ? qhDays : [0, 1, 2, 3, 4, 5, 6], // fallback just in case
         is_counter: qhIsCounter,
         target_count: qhIsCounter ? Number(qhTarget) : null,
         user_id: user.id
@@ -136,6 +142,7 @@ export default function DashboardLayout() {
       setQhCategory('Salud')
       setQhIsCounter(false)
       setQhTarget(1)
+      setQhDays([0, 1, 2, 3, 4, 5, 6])
       window.location.reload()
     } catch (err) {
       console.error(err)
@@ -295,13 +302,33 @@ export default function DashboardLayout() {
                     <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500">Categoría</label>
                     <select value={qhCategory} onChange={e => setQhCategory(e.target.value)} className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-4 rounded-[16px] focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer" style={{ appearance: 'none' }}>
                       <option value="Salud">🍎 Salud</option>
-                      <option value="Trabajo">💼 Trabajo</option>
-                      <option value="Estudio">📚 Estudio</option>
-                      <option value="Deporte">🏅 Deporte</option>
+                      <option value="Productividad">💼 Productividad</option>
+                      <option value="Ejercicio">🏅 Ejercicio</option>
+                      <option value="Estudios">📚 Estudios</option>
                       <option value="Otro">🎯 Otro</option>
                     </select>
                   </div>
-                  <div className="flex items-center justify-between p-4 rounded-[16px] border border-slate-700 bg-slate-800/40">
+
+                  <div className="flex flex-col gap-2">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500">Días a la semana</label>
+                    <div className="flex justify-between gap-1">
+                      {dayLabels.map((lbl, idx) => {
+                        const isSelected = qhDays.includes(idx)
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => toggleDay(idx)}
+                            className={`w-9 h-9 flex items-center justify-center rounded-[10px] text-[12px] font-black transition-all cursor-pointer ${isSelected ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20' : 'bg-slate-800/80 border border-slate-700 text-slate-400 hover:bg-slate-700'}`}
+                          >
+                            {lbl}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 rounded-[16px] border border-slate-700 bg-slate-800/40 mt-1">
                     <label className="text-[13px] font-bold text-slate-300 cursor-pointer flex gap-3 items-center w-full">
                       <input type="checkbox" checked={qhIsCounter} onChange={e => setQhIsCounter(e.target.checked)} className="w-5 h-5 rounded-md accent-emerald-500 cursor-pointer bg-slate-900 border-slate-700" />
                       Hábito de Conteo
@@ -313,8 +340,8 @@ export default function DashboardLayout() {
                        <input type="number" min="1" required={qhIsCounter} value={qhTarget} onChange={e => setQhTarget(e.target.value)} className="w-full bg-slate-800/80 border border-slate-700 px-4 py-3.5 rounded-[16px] text-[14px] text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner" />
                      </div>
                   )}
-                  <button type="submit" disabled={!qhName.trim()} className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-[16px] transition-all duration-300 active:scale-95 shadow-[0_4px_15px_-3px_rgba(16,185,129,0.4)] flex items-center justify-center gap-2 text-[14px] cursor-pointer">
-                    Añadir Hábito (Toda la semana)
+                  <button type="submit" disabled={!qhName.trim() || qhDays.length === 0} className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-[16px] transition-all duration-300 active:scale-95 shadow-[0_4px_15px_-3px_rgba(16,185,129,0.4)] flex items-center justify-center gap-2 text-[14px] cursor-pointer">
+                    Añadir Hábito
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                   </button>
                 </form>

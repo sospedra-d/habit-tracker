@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react'
 
 const DAY_LABELS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
-const CATEGORIES = ['Salud', 'Productividad', 'Ejercicio', 'Lectura', 'Meditación', 'Estudio', 'Otro']
+const CATEGORIES = ['Salud', 'Productividad', 'Ejercicio', 'Estudios', 'Otro']
 
 const CATEGORY_COLORS = {
   'Salud': '#10b981',
-  'Productividad': '#6c63ff',
-  'Ejercicio': '#e94560',
-  'Lectura': '#f59e0b',
-  'Meditación': '#8b5cf6',
-  'Estudio': '#06b6d4',
+  'Productividad': '#3b82f6',
+  'Ejercicio': '#f59e0b',
+  'Estudios': '#8b5cf6',
   'Otro': '#64748b',
 }
 
