@@ -311,20 +311,16 @@ export default function Today() {
             </div>
           </section>
 
-          {/* SEC 3: RECOMMENDED (Habits Algorithmic + Tasks) */}
+          {/* SEC 3: RECOMMENDED (Habits Algorithmic) */}
           <section>
             <div className="flex items-center gap-2 mb-4">
               <span className="text-[20px]">💡</span>
-              <h2 className="text-[20px] font-bold text-slate-100">Recomendado para ti</h2>
+              <h2 className="text-[20px] font-bold text-slate-100">Hábitos a Reforzar</h2>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              
-              {/* SMART HABIT RECOMMENDATIONS */}
-              <div className="space-y-4">
-                 <h3 className="text-[12px] font-bold uppercase tracking-widest text-slate-500 mb-2 border-b border-slate-800 pb-2">Hábitos a Reforzar</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                  {recommendedHabits.length === 0 ? (
-                    <div className="min-h-[120px] rounded-[16px] bg-slate-800/30 border border-slate-700/50 border-dashed flex items-center justify-center text-[14px] text-slate-500">
+                    <div className="col-span-full min-h-[120px] rounded-[16px] bg-slate-800/30 border border-slate-700/50 border-dashed flex items-center justify-center text-[14px] text-slate-500">
                       Sin recomendaciones activas.
                     </div>
                  ) : (
@@ -359,46 +355,14 @@ export default function Today() {
                           <button
                             onClick={() => toggleHabit(h)}
                             disabled={isCompleted}
-                            className={`w-full py-2.5 rounded-xl text-[12px] font-bold transition-all cursor-pointer ${isCompleted ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30' : 'bg-slate-800 text-white hover:bg-slate-700 border border-slate-700'}`}
+                            className={`w-full py-2.5 rounded-xl text-[12px] font-bold transition-all cursor-pointer ${isCompleted ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 line-through opacity-70' : 'bg-slate-800 text-white hover:bg-slate-700 border border-slate-700'}`}
                           >
-                            {isCompleted ? '¡Completado!' : 'Marcar para reforzar'}
+                            {isCompleted ? '¡Reforzado!' : 'Marcar para reforzar'}
                           </button>
                         </div>
                       )
                     })
                  )}
-              </div>
-
-              {/* TASK RECOMMENDATIONS */}
-              <div className="space-y-4">
-                 <h3 className="text-[12px] font-bold uppercase tracking-widest text-slate-500 mb-2 border-b border-slate-800 pb-2">Tareas Sugeridas</h3>
-                 {recomendadoTareas.length === 0 ? (
-                    <div className="min-h-[120px] rounded-[16px] bg-slate-800/30 border border-slate-700/50 border-dashed flex items-center justify-center text-[14px] text-slate-500">
-                      Sin tareas libres.
-                    </div>
-                 ) : (
-                    recomendadoTareas.slice(0, 3).map(todo => (
-                      <div key={todo.id} className="group p-[20px] rounded-[16px] bg-slate-800/40 border border-slate-700 transition-all hover:bg-slate-700/60 hover:shadow-lg flex flex-col justify-between">
-                        <div>
-                           <h3 className="text-[14px] font-semibold text-slate-200 break-words line-clamp-2">{todo.title}</h3>
-                           {todo.energy_level && (
-                             <span className="inline-block mt-2 text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md bg-slate-900 text-slate-400 border border-slate-700">{todo.energy_level} Energía</span>
-                           )}
-                        </div>
-                        <div className="flex items-center justify-between mt-4">
-                          <button onClick={() => completeTodo(todo.id)} className="w-6 h-6 rounded-full border-2 border-slate-600 hover:border-emerald-500 hover:bg-emerald-500/20 transition-colors flex items-center justify-center group/btn shadow-inner cursor-pointer">
-                            <svg className="w-3 h-3 text-emerald-500 opacity-0 group-hover/btn:opacity-100 transition-opacity" fill="currentColor" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" /></svg>
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                 )}
-                 {recomendadoTareas.length > 3 && (
-                   <div className="mt-3 text-right">
-                     <Link to="/tareas" className="text-[13px] text-rose-500 font-bold hover:underline">Ver {recomendadoTareas.length - 3} más &rarr;</Link>
-                   </div>
-                 )}
-              </div>
             </div>
           </section>
 

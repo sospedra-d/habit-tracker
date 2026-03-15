@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
@@ -54,8 +54,15 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
-  
-  const isHabitsView = location.pathname.includes('/habits')
+  const path = location.pathname
+
+  const isHabitsView = path.includes('/habits')
+  const isTareasView = path.includes('/tareas')
+  const isPomodoroView = path.includes('/pomodoro')
+  const isStatsView = path.includes('/estadisticas')
+  const isHoyView = path === '/' || path.includes('/hoy')
+
+  const isHiddenView = isPomodoroView || isStatsView
 
   // -- Quick Add TASK State
   const [qsTitle, setQsTitle] = useState('')
@@ -67,6 +74,16 @@ export default function DashboardLayout() {
   const [qhCategory, setQhCategory] = useState('Salud')
   const [qhIsCounter, setQhIsCounter] = useState(false)
   const [qhTarget, setQhTarget] = useState(1)
+
+  // -- Energy Widget State (Hoy)
+  const [energySelector, setEnergySelector] = useState(null)
+  const [widgetTodos, setWidgetTodos] = useState([])
+
+  useEffect(() => {
+    if (isHoyView) {
+      supabase.from('todos').select('*').eq('is_completed', false).then(({ data }) => setWidgetTodos(data || []))
+    }
+  }, [isHoyView])
 
   const handleTaskSubmit = async (e) => {
     e.preventDefault()
@@ -126,6 +143,20 @@ export default function DashboardLayout() {
     }
   }
 
+  const completeWidgetTodo = async (id) => {
+     try {
+       await supabase.from('todos').update({is_completed:true}).eq('id', id)
+       setWidgetTodos(prev => prev.filter(x => x.id !== id))
+     } catch(err) { console.error(err) }
+  }
+
+  const energyFilteredTodos = widgetTodos
+    .filter(t => t.energy_level === energySelector)
+    .sort((a,b) => {
+       if(!a.due_date) return 1; if(!b.due_date) return -1;
+       return new Date(a.due_date) - new Date(b.due_date);
+    })
+
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-primary)' }}>
       {/* 1. LEFT SIDEBAR */}
@@ -184,154 +215,150 @@ export default function DashboardLayout() {
           <div className="w-10" />
         </header>
 
+        {/* Dynamic Outlet */}
         <main className="flex-1 p-6">
           <Outlet />
         </main>
       </div>
 
-      {/* 3. DYNAMIC RIGHT PANEL (360px) */}
-      <aside className="hidden xl:flex flex-col shrink-0 w-[360px] h-screen sticky top-0 border-l border-slate-700/50 bg-slate-900/30 overflow-y-auto p-6 custom-scrollbar">
-         
-         <div className="mb-8">
-           {isHabitsView ? (
-             <>
-               <h3 className="text-[20px] font-bold text-slate-100 flex items-center gap-2 tracking-tight">
-                 <span className="text-emerald-500">✨</span> Quick Add Hábito
-               </h3>
-               <p className="text-[12px] font-medium text-slate-500 mt-1">Forja un hábito al instante.</p>
-             </>
-           ) : (
-             <>
-               <h3 className="text-[20px] font-bold text-slate-100 flex items-center gap-2 tracking-tight">
-                 <span className="text-rose-500">⚡</span> Quick Add Tarea
-               </h3>
-               <p className="text-[12px] font-medium text-slate-500 mt-1">Captura rápido, ordena luego.</p>
-             </>
-           )}
-         </div>
+      {/* 3. DYNAMIC RIGHT PANEL (Hidden on Pomodoro & Stats to clean UI) */}
+      {!isHiddenView && (
+        <aside className="hidden xl:flex flex-col shrink-0 w-[380px] h-screen sticky top-0 border-l border-slate-700/50 bg-slate-900/40 overflow-y-auto p-8 custom-scrollbar relative">
+          
+          {/* Subtle Glow Background based on view */}
+          <div className="absolute top-0 right-0 w-64 h-64 rounded-full blur-[100px] pointer-events-none opacity-10" 
+               style={{ background: isHabitsView ? '#10b981' : isHoyView ? '#f59e0b' : '#f43f5e' }} />
 
-         {/* --- CONDITIONAL FORMS --- */}
-         {isHabitsView ? (
-            <form onSubmit={handleHabitSubmit} className="flex flex-col gap-4 animate-fade-in-up">
-              <div>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: Beber 2L de Agua..."
-                  autoFocus
-                  className="w-full bg-slate-800/80 border border-slate-700 px-4 py-3.5 rounded-[16px] text-[14px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
-                  value={qhName}
-                  onChange={e => setQhName(e.target.value)}
-                />
-              </div>
+          <div className="relative z-10 w-full flex flex-col h-full">
 
-              <div className="flex flex-col gap-2">
-                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500">Categoría</label>
-                <select
-                  value={qhCategory}
-                  onChange={e => setQhCategory(e.target.value)}
-                  className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-4 rounded-[16px] focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer"
-                  style={{ appearance: 'none' }}
-                >
-                  <option value="Salud">🍎 Salud</option>
-                  <option value="Trabajo">💼 Trabajo</option>
-                  <option value="Estudio">📚 Estudio</option>
-                  <option value="Deporte">🏅 Deporte</option>
-                  <option value="Otro">🎯 Otro</option>
-                </select>
-              </div>
-
-              <div className="flex items-center justify-between p-4 rounded-[16px] border border-slate-700 bg-slate-800/40">
-                <label className="text-[13px] font-bold text-slate-300 cursor-pointer flex gap-3 items-center w-full">
-                  <input
-                    type="checkbox"
-                    checked={qhIsCounter}
-                    onChange={e => setQhIsCounter(e.target.checked)}
-                    className="w-5 h-5 rounded-md accent-emerald-500 cursor-pointer bg-slate-900 border-slate-700"
-                  />
-                  Hábito de Conteo
-                </label>
-              </div>
-
-              {qhIsCounter && (
-                 <div className="flex flex-col gap-2 animate-fade-in-up">
-                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500">Meta Diaria</label>
-                   <input
-                     type="number"
-                     min="1"
-                     required={qhIsCounter}
-                     value={qhTarget}
-                     onChange={e => setQhTarget(e.target.value)}
-                     className="w-full bg-slate-800/80 border border-slate-700 px-4 py-3.5 rounded-[16px] text-[14px] text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner"
-                   />
-                 </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={!qhName.trim()}
-                className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-[16px] transition-all duration-300 active:scale-95 shadow-[0_4px_15px_-3px_rgba(16,185,129,0.4)] flex items-center justify-center gap-2 text-[14px]"
-              >
-                Añadir Hábito (Toda la semana)
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-              </button>
-            </form>
-         ) : (
-            <form onSubmit={handleTaskSubmit} className="flex flex-col gap-4 animate-fade-in-up">
-              <div>
-                <input
-                  type="text"
-                  required
-                  placeholder="I need to do..."
-                  className="w-full bg-slate-800/80 border border-slate-700 px-4 py-3.5 rounded-[16px] text-[14px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors shadow-inner"
-                  value={qsTitle}
-                  onChange={e => setQsTitle(e.target.value)}
-                />
-              </div>
-
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Energía</label>
-                  <select
-                    value={qsEnergy}
-                    onChange={e => setQsEnergy(e.target.value)}
-                    className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-4 rounded-[16px] focus:outline-none focus:border-rose-500 transition-colors cursor-pointer"
-                    style={{ appearance: 'none' }}
-                  >
-                    <option value="low">🔋 Baja</option>
-                    <option value="medium">⚡ Media</option>
-                    <option value="high">🔥 Alta</option>
-                  </select>
+            {/* --- HOY: ENERGY BATTERY WIDGET --- */}
+            {isHoyView && (
+              <div className="animate-fade-in-up flex flex-col h-full">
+                <div className="mb-8">
+                  <h3 className="text-[22px] font-black text-slate-100 flex items-center gap-2 tracking-tight">
+                    <span className="text-amber-500">🔋</span> Nivel de Batería
+                  </h3>
+                  <p className="text-[13px] font-medium text-slate-400 mt-2 leading-relaxed">
+                    ¿Cuánta energía tienes ahora mismo? Haz clic para ver qué deberías atacar a continuación.
+                  </p>
                 </div>
 
-                <div className="flex-1">
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Fecha (Opc.)</label>
-                  <input
-                    type="date"
-                    value={qsDate}
-                    onChange={e => setQsDate(e.target.value)}
-                    className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-3 rounded-[16px] focus:outline-none focus:border-rose-500 transition-colors [&::-webkit-calendar-picker-indicator]:invert-[0.6] cursor-pointer"
-                  />
+                <div className="flex gap-2 mb-8">
+                  <button onClick={() => setEnergySelector('low')} className={`flex-1 py-3.5 rounded-[16px] text-[13px] font-black border-2 transition-all cursor-pointer ${energySelector === 'low' ? 'bg-emerald-500/20 text-emerald-500 border-emerald-500/50 scale-[1.03] shadow-lg shadow-emerald-500/10' : 'bg-slate-800/80 text-slate-400 border-slate-700/50 hover:bg-slate-800 hover:border-emerald-500/30'}`}>🔋 Baja</button>
+                  <button onClick={() => setEnergySelector('medium')} className={`flex-1 py-3.5 rounded-[16px] text-[13px] font-black border-2 transition-all cursor-pointer ${energySelector === 'medium' ? 'bg-amber-500/20 text-amber-500 border-amber-500/50 scale-[1.03] shadow-lg shadow-amber-500/10' : 'bg-slate-800/80 text-slate-400 border-slate-700/50 hover:bg-slate-800 hover:border-amber-500/30'}`}>⚡ Media</button>
+                  <button onClick={() => setEnergySelector('high')} className={`flex-1 py-3.5 rounded-[16px] text-[13px] font-black border-2 transition-all cursor-pointer ${energySelector === 'high' ? 'bg-rose-500/20 text-rose-500 border-rose-500/50 scale-[1.03] shadow-lg shadow-rose-500/10' : 'bg-slate-800/80 text-slate-400 border-slate-700/50 hover:bg-slate-800 hover:border-rose-500/30'}`}>🔥 Alta</button>
                 </div>
+
+                {energySelector && (
+                  <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar animate-fade-in-up space-y-4">
+                     <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800 pb-2">
+                       Matches de Energía ({energyFilteredTodos.length})
+                     </h4>
+                     
+                     {energyFilteredTodos.length === 0 ? (
+                       <div className="min-h-[100px] rounded-[16px] bg-slate-800/30 border border-slate-700/50 border-dashed flex items-center justify-center p-4 text-center">
+                         <p className="text-[13px] font-medium text-slate-500 leading-relaxed">No hay tareas sueltas con este nivel de energía. ¡Tómate un descanso brutal! ☕</p>
+                       </div>
+                     ) : (
+                       energyFilteredTodos.map(t => (
+                         <div key={t.id} className="p-4 bg-slate-800/60 border border-slate-700 rounded-[16px] transition-all hover:bg-slate-700/60 group cursor-default shadow-sm hover:shadow-md">
+                           <div className="flex items-start justify-between gap-3">
+                             <p className="text-[14px] font-semibold text-slate-200 leading-snug">{t.title}</p>
+                             <button onClick={() => completeWidgetTodo(t.id)} className="w-6 h-6 shrink-0 rounded-full border-2 border-slate-600 hover:border-emerald-500 hover:bg-emerald-500/20 transition-colors flex items-center justify-center cursor-pointer">
+                               <svg className="w-3 h-3 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" fill="currentColor" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" /></svg>
+                             </button>
+                           </div>
+                           {t.due_date && <p className="text-[11px] text-rose-400 font-bold mt-2">⚠️ Vence: {t.due_date.split('-').reverse().slice(0,2).join('/')}</p>}
+                         </div>
+                       ))
+                     )}
+                  </div>
+                )}
               </div>
+            )}
 
-              <button
-                type="submit"
-                disabled={!qsTitle.trim()}
-                className="mt-2 w-full bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-[16px] transition-all duration-300 active:scale-95 shadow-[0_4px_15px_-3px_rgba(244,63,94,0.4)] flex items-center justify-center gap-2 text-[14px]"
-              >
-                Añadir a Bandeja
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-              </button>
-            </form>
-         )}
 
-         {/* Optional global motivational graphic */}
-         <div className="mt-auto opacity-20 pointer-events-none flex flex-col items-center justify-center pt-20">
-            <svg className={`w-48 h-48 blur-xl transition-colors duration-1000 ${isHabitsView ? 'text-emerald-500' : 'text-rose-500'}`} viewBox="0 0 100 100" fill="currentColor"><circle cx="50" cy="50" r="50"/></svg>
-         </div>
+            {/* --- HABITS: QUICK ADD HABIT --- */}
+            {isHabitsView && (
+              <div className="animate-fade-in-up">
+                <div className="mb-8">
+                  <h3 className="text-[22px] font-black text-slate-100 flex items-center gap-2 tracking-tight">
+                    <span className="text-emerald-500">✨</span> Quick Add Hábito
+                  </h3>
+                  <p className="text-[13px] font-medium text-slate-400 mt-1">Forja un hábito al instante.</p>
+                </div>
+                <form onSubmit={handleHabitSubmit} className="flex flex-col gap-4">
+                  <div>
+                    <input type="text" required placeholder="Ej: Beber 2L de Agua..." autoFocus className="w-full bg-slate-800/80 border border-slate-700 px-4 py-3.5 rounded-[16px] text-[14px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner" value={qhName} onChange={e => setQhName(e.target.value)} />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500">Categoría</label>
+                    <select value={qhCategory} onChange={e => setQhCategory(e.target.value)} className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-4 rounded-[16px] focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer" style={{ appearance: 'none' }}>
+                      <option value="Salud">🍎 Salud</option>
+                      <option value="Trabajo">💼 Trabajo</option>
+                      <option value="Estudio">📚 Estudio</option>
+                      <option value="Deporte">🏅 Deporte</option>
+                      <option value="Otro">🎯 Otro</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center justify-between p-4 rounded-[16px] border border-slate-700 bg-slate-800/40">
+                    <label className="text-[13px] font-bold text-slate-300 cursor-pointer flex gap-3 items-center w-full">
+                      <input type="checkbox" checked={qhIsCounter} onChange={e => setQhIsCounter(e.target.checked)} className="w-5 h-5 rounded-md accent-emerald-500 cursor-pointer bg-slate-900 border-slate-700" />
+                      Hábito de Conteo
+                    </label>
+                  </div>
+                  {qhIsCounter && (
+                     <div className="flex flex-col gap-2 animate-fade-in-up">
+                       <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500">Meta Diaria</label>
+                       <input type="number" min="1" required={qhIsCounter} value={qhTarget} onChange={e => setQhTarget(e.target.value)} className="w-full bg-slate-800/80 border border-slate-700 px-4 py-3.5 rounded-[16px] text-[14px] text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors shadow-inner" />
+                     </div>
+                  )}
+                  <button type="submit" disabled={!qhName.trim()} className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-[16px] transition-all duration-300 active:scale-95 shadow-[0_4px_15px_-3px_rgba(16,185,129,0.4)] flex items-center justify-center gap-2 text-[14px] cursor-pointer">
+                    Añadir Hábito (Toda la semana)
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                  </button>
+                </form>
+              </div>
+            )}
 
-      </aside>
+            {/* --- TAREAS: QUICK ADD TAREA --- */}
+            {isTareasView && (
+              <div className="animate-fade-in-up">
+                <div className="mb-8">
+                  <h3 className="text-[22px] font-black text-slate-100 flex items-center gap-2 tracking-tight">
+                    <span className="text-rose-500">⚡</span> Quick Add Tarea
+                  </h3>
+                  <p className="text-[13px] font-medium text-slate-400 mt-1">Captura rápido, ordena luego.</p>
+                </div>
+                <form onSubmit={handleTaskSubmit} className="flex flex-col gap-4">
+                  <div>
+                    <input type="text" required autoFocus placeholder="I need to do..." className="w-full bg-slate-800/80 border border-slate-700 px-4 py-3.5 rounded-[16px] text-[14px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors shadow-inner" value={qsTitle} onChange={e => setQsTitle(e.target.value)} />
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Energía</label>
+                      <select value={qsEnergy} onChange={e => setQsEnergy(e.target.value)} className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-4 rounded-[16px] focus:outline-none focus:border-rose-500 transition-colors cursor-pointer" style={{ appearance: 'none' }}>
+                        <option value="low">🔋 Baja</option>
+                        <option value="medium">⚡ Media</option>
+                        <option value="high">🔥 Alta</option>
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Fecha (Opc.)</label>
+                      <input type="date" value={qsDate} onChange={e => setQsDate(e.target.value)} className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-3 rounded-[16px] focus:outline-none focus:border-rose-500 transition-colors [&::-webkit-calendar-picker-indicator]:invert-[0.6] cursor-pointer" />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={!qsTitle.trim()} className="mt-2 w-full bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-[16px] transition-all duration-300 active:scale-95 shadow-[0_4px_15px_-3px_rgba(244,63,94,0.4)] flex items-center justify-center gap-2 text-[14px] cursor-pointer">
+                    Añadir a Bandeja
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                  </button>
+                </form>
+              </div>
+            )}
+
+          </div>
+        </aside>
+      )}
     </div>
   )
 }
