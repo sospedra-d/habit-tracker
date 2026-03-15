@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient'
 
 export default function Login() {
   const navigate = useNavigate()
-  const [email, setEmail] = useState('dani@example.com')
+  const [email, setEmail] = useState('danisospedra22@gmail.com')
   const [password, setPassword] = useState('dani123')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -180,19 +180,7 @@ export default function Login() {
             </button>
           </form>
 
-          {/* Divider */}
-          <div className="flex items-center mt-6 mb-4">
-            <div className="flex-1 h-px" style={{ background: 'var(--border-subtle)' }} />
-            <span className="px-3 text-xs" style={{ color: 'var(--text-secondary)' }}>o</span>
-            <div className="flex-1 h-px" style={{ background: 'var(--border-subtle)' }} />
-          </div>
 
-          <p className="text-center text-xs" style={{ color: 'var(--text-secondary)' }}>
-            ¿No tienes cuenta?{' '}
-            <a href="#" className="font-medium transition-colors hover:underline" style={{ color: 'var(--accent-primary)' }}>
-              Regístrate gratis
-            </a>
-          </p>
         </div>
 
         {/* Footer */}

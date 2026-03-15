@@ -52,6 +52,7 @@ const navItems = [
 
 export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
   const path = location.pathname
@@ -171,6 +172,10 @@ export default function DashboardLayout() {
         <div className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
       )}
 
+      {rightPanelOpen && !isHiddenView && (
+        <div className="fixed inset-0 bg-black/50 z-30 xl:hidden backdrop-blur-sm" onClick={() => setRightPanelOpen(false)} />
+      )}
+
       <aside className={`fixed lg:sticky top-0 left-0 z-40 h-screen w-[240px] flex flex-col shrink-0 border-r border-slate-700/50 transition-transform duration-300 ease-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`} style={{ background: 'var(--glass-bg)' }}>
         <div className="flex items-center gap-3 px-6 py-8">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--accent-gradient)' }}>
@@ -179,7 +184,7 @@ export default function DashboardLayout() {
             </svg>
           </div>
           <div>
-            <h2 className="text-[14px] font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>Habit Tracker</h2>
+            <h2 className="text-[14px] font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>dani</h2>
             <p className="text-[10px] uppercase font-bold text-rose-500 tracking-widest">Workspace</p>
           </div>
         </div>
@@ -219,7 +224,19 @@ export default function DashboardLayout() {
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
           </button>
           <h2 className="text-[14px] font-bold text-slate-100">Habit Tracker</h2>
-          <div className="w-10" />
+          {!isHiddenView ? (
+            <button 
+              onClick={() => setRightPanelOpen(true)} 
+              className="px-4 py-2.5 bg-rose-500 text-white rounded-2xl hover:bg-rose-600 transition-all font-black text-[13px] flex items-center gap-2 shadow-lg shadow-rose-500/20 active:scale-95"
+            >
+              <span>Añadir</span>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </button>
+          ) : (
+            <div className="w-10" />
+          )}
         </header>
 
         {/* Dynamic Outlet */}
@@ -230,8 +247,17 @@ export default function DashboardLayout() {
 
       {/* 3. DYNAMIC RIGHT PANEL (Hidden on Pomodoro & Stats to clean UI) */}
       {!isHiddenView && (
-        <aside className="hidden xl:flex flex-col shrink-0 w-[380px] h-screen sticky top-0 border-l border-slate-700/50 bg-slate-900/40 overflow-y-auto p-8 custom-scrollbar relative">
+        <aside className={`fixed xl:sticky top-0 right-0 z-40 h-screen w-[320px] sm:w-[400px] flex flex-col shrink-0 border-l border-slate-700/50 bg-slate-900/95 xl:bg-slate-900/40 transition-transform duration-300 ease-out overflow-y-auto p-6 sm:p-8 custom-scrollbar relative ${rightPanelOpen ? 'translate-x-0' : 'translate-x-full xl:translate-x-0'}`}>
           
+          {/* Mobile Close Button */}
+          <button 
+            onClick={() => setRightPanelOpen(false)}
+            className="xl:hidden absolute top-6 right-6 p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors border border-slate-700 hover:border-slate-500 z-50"
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>          
           {/* Subtle Glow Background based on view */}
           <div className="absolute top-0 right-0 w-64 h-64 rounded-full blur-[100px] pointer-events-none opacity-10" 
                style={{ background: isHabitsView ? '#10b981' : isHoyView ? '#f59e0b' : '#f43f5e' }} />

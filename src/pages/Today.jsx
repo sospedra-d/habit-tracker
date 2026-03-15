@@ -82,17 +82,26 @@ export default function Today() {
   const completeTodo = async (id) => {
     try {
       const { error } = await supabase.from('todos').update({ is_completed: true }).eq('id', id)
-      if (!error) setTodos(prev => prev.filter(t => t.id !== id))
-    } catch (err) { console.error(err) }
+      if (error) {
+        alert("Error al completar tarea: " + error.message)
+        return
+      }
+      setTodos(prev => prev.filter(t => t.id !== id))
+      window.location.reload() // Force sync across widgets
+    } catch (err) { 
+      console.error(err)
+      alert("Error inesperado al completar tarea.")
+    }
   }
 
   // --- HABITS SMART LOGIC (Algorithm with Mocks) ---
   const { todaysHabits, recommendedHabits } = useMemo(() => {
     // 1. Filter today's habits
     const todayList = habits.filter(h => {
-      if (!h.frequency || h.frequency.length === 0) return true
-      const jsDayToChar = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
-      return h.frequency.includes(jsDayToChar[dayOfWeekIndex])
+      // If no days selected, assume every day (legacy) or check days_of_week
+      if (!h.days_of_week) return true
+      if (Array.isArray(h.days_of_week) && h.days_of_week.length === 0) return true
+      return h.days_of_week.includes(dayOfWeekIndex)
     })
 
     // 2. Build Mock Histories & Algorithm for Recommendations
@@ -170,28 +179,63 @@ export default function Today() {
   const toggleHabit = async (habit) => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const { current, progress } = getHabitProgress(habit)
+      if (!user) {
+        alert("Necesitas iniciar sesión")
+        return
+      }
+
+      const { current, target, progress } = getHabitProgress(habit)
       const isCompleted = progress >= 1
 
       if (!habit.is_counter) {
         if (isCompleted) {
-          await supabase.from('habit_logs').delete().match({ habit_id: habit.id, completed_at: todayStr })
+          // Uncheck
+          const { error } = await supabase.from('habit_logs').delete()
+            .eq('habit_id', habit.id)
+            .eq('completed_at', todayStr)
+          
+          if (error) throw error
           setHabitLogs(prev => prev.filter(l => l.habit_id !== habit.id))
         } else {
-          const { data } = await supabase.from('habit_logs').insert([{ habit_id: habit.id, user_id: user.id, count: 1, completed_at: todayStr }]).select()
-          if (data) setHabitLogs(prev => [...prev, data[0]])
+          // Check
+          const { data, error } = await supabase.from('habit_logs')
+            .upsert([{ 
+              habit_id: habit.id, 
+              count: 1, 
+              completed_at: todayStr 
+            }], { onConflict: 'habit_id, completed_at' })
+            .select()
+          
+          if (error) throw error
+          if (data) setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
         }
       } else {
-        const newCount = current + 1
-        if (current === 0) {
-          const { data } = await supabase.from('habit_logs').insert([{ habit_id: habit.id, user_id: user.id, count: 1, completed_at: todayStr }]).select()
-          if (data) setHabitLogs(prev => [...prev, data[0]])
-        } else if (!isCompleted) {
-          const { data } = await supabase.from('habit_logs').update({ count: newCount }).match({ habit_id: habit.id, completed_at: todayStr }).select()
-          if (data) setHabitLogs(prev => prev.map(l => l.habit_id === habit.id ? data[0] : l))
+        // Counter habit increment
+        const nextCount = isCompleted ? 0 : current + 1
+        if (nextCount === 0) {
+          const { error } = await supabase.from('habit_logs').delete()
+            .eq('habit_id', habit.id)
+            .eq('completed_at', todayStr)
+          
+          if (error) throw error
+          setHabitLogs(prev => prev.filter(l => l.habit_id !== habit.id))
+        } else {
+          const { data, error } = await supabase.from('habit_logs')
+            .upsert([{ 
+              habit_id: habit.id, 
+              count: nextCount, 
+              completed_at: todayStr 
+            }], { onConflict: 'habit_id, completed_at' })
+            .select()
+          
+          if (error) throw error
+          if (data) setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
         }
       }
-    } catch (err) { console.error(err) }
+    } catch (err) { 
+      console.error('Error toggling habit:', err) 
+      alert("Error al actualizar hábito: " + (err.message || "revisa tu conexión"))
+    }
   }
 
   // --- POMODORO LOGIC ---
@@ -239,8 +283,8 @@ export default function Today() {
                        {todo.due_date && <p className="text-[12px] text-rose-400 mt-1 font-bold">⚠️ Vence: {todo.due_date.split('-').reverse().slice(0,2).join('/')}</p>}
                     </div>
                     <div className="flex items-center justify-between mt-4">
-                      <button onClick={() => completeTodo(todo.id)} className="w-6 h-6 rounded-full border-2 border-slate-500 hover:border-emerald-500 hover:bg-emerald-500/20 transition-colors flex items-center justify-center group/btn shadow-inner">
-                        <svg className="w-3 h-3 text-emerald-500 opacity-0 group-hover/btn:opacity-100" fill="currentColor" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      <button onClick={() => completeTodo(todo.id)} className="w-9 h-9 sm:w-8 sm:h-8 rounded-full border-2 border-slate-500 hover:border-emerald-500 hover:bg-emerald-500/20 transition-colors flex items-center justify-center group/btn shadow-inner cursor-pointer">
+                        <svg className="w-5 h-5 sm:w-4 sm:h-4 text-emerald-500 opacity-0 group-hover/btn:opacity-100" fill="currentColor" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" /></svg>
                       </button>
                       <button onClick={() => navigate('/pomodoro')} className="text-[11px] font-bold text-white bg-rose-500 px-3 py-1.5 rounded-lg hover:bg-rose-600 transition-colors shadow-[0_4px_10px_rgba(244,63,94,0.3)]">
                         Enfocar
@@ -287,10 +331,10 @@ export default function Today() {
                         {!h.is_counter ? (
                           <button
                             onClick={() => toggleHabit(h)}
-                            className="flex items-center gap-2 group cursor-pointer"
+                            className="flex items-center gap-3 group cursor-pointer"
                           >
-                            <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600 group-hover:border-emerald-500'}`}>
-                               {isCompleted && <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                            <div className={`w-9 h-9 sm:w-8 sm:h-8 rounded-xl border-2 flex items-center justify-center transition-colors ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600 group-hover:border-emerald-500'}`}>
+                               {isCompleted && <svg className="w-5 h-5 sm:w-4 sm:h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
                             </div>
                             <span className="text-[13px] font-semibold text-slate-400 group-hover:text-slate-300">{isCompleted ? 'Completado' : 'Marcar complete'}</span>
                           </button>
