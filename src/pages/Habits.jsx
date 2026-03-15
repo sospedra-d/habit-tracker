@@ -86,7 +86,7 @@ export default function Habits() {
       await fetchData()
     } catch (err) {
       console.error('Error saving habit:', err)
-      alert("Hubo un error al guardar el hábito. Si acabas de actualizar la base de datos, intenta refrescar la página.")
+      alert(`Error al guardar: ${err.message || 'Intenta refrescar la página'}`)
     }
   }
 
