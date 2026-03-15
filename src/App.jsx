@@ -7,6 +7,7 @@ import Habits from './pages/Habits'
 import Pomodoro from './pages/Pomodoro'
 import DashboardPage from './pages/Dashboard'
 import Todos from './pages/Todos'
+import Today from './pages/Today'
 
 function ProtectedRoute({ session, children }) {
   const location = useLocation()
@@ -42,7 +43,7 @@ function App() {
     <Routes>
       <Route 
         path="/login" 
-        element={session ? <Navigate to="/habits" replace /> : <Login />} 
+        element={session ? <Navigate to="/hoy" replace /> : <Login />} 
       />
       
       <Route 
@@ -53,7 +54,8 @@ function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/habits" replace />} />
+        <Route index element={<Navigate to="/hoy" replace />} />
+        <Route path="hoy" element={<Today />} />
         <Route path="habits" element={<Habits />} />
         <Route path="pomodoro" element={<Pomodoro />} />
         <Route path="estadisticas" element={<DashboardPage />} />

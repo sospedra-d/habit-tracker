@@ -30,12 +30,6 @@ const ENERGY_STYLES = {
 export default function Todos() {
   const [todos, setTodos] = useState([])
   const [loading, setLoading] = useState(true)
-  
-  // Quick Add State
-  const [title, setTitle] = useState('')
-  const [dueDate, setDueDate] = useState('')
-  const [energy, setEnergy] = useState('medium')
-  const [isFormExpanded, setIsFormExpanded] = useState(false)
 
   // Wizard State
   const [showWizard, setShowWizard] = useState(false)
@@ -163,39 +157,6 @@ export default function Todos() {
     }
   }
 
-  const handleAdd = async (e) => {
-    e.preventDefault()
-    if (!title.trim()) return
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const payload = {
-        title: title.trim(),
-        description: null, // Keep description hidden in fast UI to keep it clean
-        due_date: dueDate || null,
-        energy_level: energy,
-        user_id: user.id
-      }
-
-      const { data, error } = await supabase.from('todos').insert([payload]).select()
-      if (error) throw error
-
-      if (data) {
-        setTodos(prev => [data[0], ...prev])
-      }
-      
-      setTitle('')
-      setDueDate('')
-      setEnergy('medium')
-      setIsFormExpanded(false)
-    } catch (err) {
-      console.error('Error adding todo:', err)
-      alert('Error al guardar la tarea en la base de datos: ' + err.message + '\n\n¿Ejecutaste el comando SQL de energy_level correctamente?')
-    }
-  }
-
   const getDaysLeftText = (dateStr) => {
     const today = new Date()
     today.setHours(0,0,0,0)
@@ -291,7 +252,15 @@ export default function Todos() {
   }
 
   return (
-    <div className="animate-fade-in-up max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 mt-4 relative">
+    <div className="animate-fade-in-up pb-16 relative">
+      <div className="mb-8">
+        <h1 className="text-[32px] font-black tracking-tight text-slate-100">
+          To-Do / Bandeja
+        </h1>
+        <p className="text-[14px] text-slate-400 font-medium tracking-wide">
+          Matriz de Eisenhower y Recomendaciones
+        </p>
+      </div>
       
       {/* Mega Magic Button */}
       <div className="mb-10 flex justify-center">
@@ -314,54 +283,6 @@ export default function Todos() {
             What can I do right now?
           </span>
         </button>
-      </div>
-
-      {/* QUICK ADD INLINE BAR */}
-      <div className="mb-12 relative z-10">
-        <form 
-          onSubmit={handleAdd} 
-          className="bg-slate-800/80 backdrop-blur-xl border border-slate-700/50 rounded-2xl p-2 sm:p-3 shadow-2xl flex flex-col sm:flex-row items-center gap-3 transition-all focus-within:ring-2 focus-within:ring-rose-500/50"
-        >
-          <input
-            type="text"
-            required
-            placeholder="I need to..."
-            className="flex-1 w-full sm:w-auto bg-transparent px-4 py-2 font-medium text-slate-100 placeholder-slate-500 focus:outline-none text-[15px]"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            onFocus={() => setIsFormExpanded(true)}
-          />
-
-          <div className={`flex w-full sm:w-auto overflow-hidden transition-all duration-300 ease-in-out ${isFormExpanded ? 'max-w-[500px] opacity-100' : 'max-w-0 opacity-0 sm:max-w-max sm:opacity-100'}`}>
-            <div className="flex flex-1 items-center gap-2 pr-2">
-              <select
-                value={energy}
-                onChange={e => setEnergy(e.target.value)}
-                className="bg-slate-900/50 border border-slate-700 text-slate-300 text-[13px] font-bold py-2 px-3 rounded-xl focus:outline-none focus:border-rose-500 transition-colors"
-                style={{ appearance: 'none' }}
-              >
-                <option value="low">🔋 Baja Energía</option>
-                <option value="medium">⚡ Media Energía</option>
-                <option value="high">🔥 Alta Concentración</option>
-              </select>
-
-              <input
-                type="date"
-                value={dueDate}
-                onChange={e => setDueDate(e.target.value)}
-                className="bg-slate-900/50 border border-slate-700 text-slate-300 text-[13px] font-bold py-2 px-3 rounded-xl focus:outline-none focus:border-rose-500 transition-colors [&::-webkit-calendar-picker-indicator]:invert-[0.6]"
-              />
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={!title.trim()}
-            className="w-full sm:w-auto bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:hover:bg-rose-500 text-white p-3 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0"
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 4.5v15m7.5-7.5h-15" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </button>
-        </form>
       </div>
 
       {loading ? (

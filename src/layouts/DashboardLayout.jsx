@@ -4,11 +4,11 @@ import { supabase } from '../supabaseClient'
 
 const navItems = [
   {
-    to: '/habits',
-    label: 'Mis Hábitos',
+    to: '/hoy',
+    label: 'Hoy',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
       </svg>
     ),
   },
@@ -18,6 +18,15 @@ const navItems = [
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/habits',
+    label: 'Hábitos',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
   },
@@ -45,10 +54,51 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const navigate = useNavigate()
 
+  // Quick Add State (Global Right Panel)
+  const [qsTitle, setQsTitle] = useState('')
+  const [qsEnergy, setQsEnergy] = useState('medium')
+  const [qsDate, setQsDate] = useState('')
+
+  const handleQuickSubmit = async (e) => {
+    e.preventDefault()
+    if (!qsTitle.trim()) return
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const payload = {
+        title: qsTitle.trim(),
+        description: null,
+        due_date: qsDate || null,
+        energy_level: qsEnergy,
+        user_id: user.id
+      }
+      const { error } = await supabase.from('todos').insert([payload])
+      if (error) {
+         console.error(error)
+         alert('Error SQL: ' + error.message)
+         return
+      }
+
+      setQsTitle('')
+      setQsDate('')
+      setQsEnergy('medium')
+      
+      // If we are on /tareas or /hoy, reload to see changes globally (simple approach)
+      window.location.reload()
+      
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-primary)' }}>
       
-      {/* Mobile overlay */}
+      {/* -----------------------------
+          COLUMN 1: LEFT SIDEBAR (240px)
+          ----------------------------- */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-sm"
@@ -56,41 +106,32 @@ export default function DashboardLayout() {
         />
       )}
 
-      {/* Sidebar */}
       <aside
         className={`
-          fixed lg:sticky top-0 left-0 z-40 h-screen w-[260px] flex flex-col
-          border-r backdrop-blur-xl transition-transform duration-300 ease-out
+          fixed lg:sticky top-0 left-0 z-40 h-screen w-[240px] flex flex-col shrink-0
+          border-r border-slate-700/50 transition-transform duration-300 ease-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
-        style={{
-          background: 'var(--glass-bg)',
-          borderColor: 'var(--border-subtle)',
-        }}
+        style={{ background: 'var(--glass-bg)' }}
       >
-        {/* Sidebar Header */}
-        <div className="flex items-center gap-3 px-5 py-6 border-b"
-             style={{ borderColor: 'var(--border-subtle)' }}>
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-               style={{ background: 'var(--accent-gradient)' }}>
+        <div className="flex items-center gap-3 px-6 py-8">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--accent-gradient)' }}>
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <div>
-            <h2 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+            <h2 className="text-[14px] font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>
               Habit Tracker
             </h2>
-            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              Dashboard
+            <p className="text-[10px] uppercase font-bold text-rose-500 tracking-widest">
+              Workspace
             </p>
           </div>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          <p className="px-3 mb-3 text-xs font-semibold uppercase tracking-widest"
-             style={{ color: 'var(--text-secondary)', opacity: 0.6 }}>
+        <nav className="flex-1 px-4 py-2 space-y-1">
+          <p className="px-2 mb-4 text-[11px] font-bold uppercase tracking-widest text-slate-500">
             Navegación
           </p>
           {navItems.map((item) => (
@@ -99,73 +140,126 @@ export default function DashboardLayout() {
               to={item.to}
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group ${
-                  isActive ? 'shadow-lg' : 'hover:scale-[1.02]'
+                `flex items-center gap-3 px-3 py-2.5 rounded-[12px] text-[14px] font-semibold transition-all duration-200 group ${
+                  isActive ? 'shadow-lg' : 'hover:bg-slate-800/40'
                 }`
               }
               style={({ isActive }) => ({
                 background: isActive ? 'var(--accent-gradient)' : 'transparent',
                 color: isActive ? '#ffffff' : 'var(--text-secondary)',
-                boxShadow: isActive ? '0 4px 15px rgba(108, 99, 255, 0.3)' : 'none',
+                boxShadow: isActive ? '0 4px 15px rgba(244, 63, 94, 0.3)' : 'none',
               })}
             >
-              {item.icon}
+              <span className="opacity-80 group-hover:opacity-100">{item.icon}</span>
               {item.label}
             </NavLink>
           ))}
         </nav>
 
-        {/* Sidebar Footer */}
-        <div className="px-3 py-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="px-4 py-6">
           <button
             onClick={async () => {
               await supabase.auth.signOut()
               navigate('/login')
             }}
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 hover:scale-[1.02] cursor-pointer"
-
-            style={{ color: 'var(--text-secondary)' }}
-            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(233, 69, 96, 0.1)'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-[12px] text-[14px] font-semibold transition-all hover:bg-rose-500/10 hover:text-rose-500 text-slate-400 cursor-pointer"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-5 h-5 opacity-80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
             </svg>
-            Cerrar Sesión
+            Salir
           </button>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-screen">
-        {/* Top Bar (mobile) */}
-        <header
-          className="lg:hidden sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b backdrop-blur-xl"
-          style={{
-            background: 'var(--glass-bg)',
-            borderColor: 'var(--border-subtle)',
-          }}
-        >
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="p-2 rounded-lg transition-colors cursor-pointer"
-            style={{ color: 'var(--text-secondary)' }}
-          >
+      {/* -----------------------------
+          COLUMN 2: MAIN CONTENT (Flex)
+          ----------------------------- */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto custom-scrollbar">
+        {/* Mobile Header */}
+        <header className="lg:hidden sticky top-0 z-20 flex items-center justify-between px-4 py-3 border-b border-slate-700/50 bg-slate-900/80 backdrop-blur-xl">
+          <button onClick={() => setSidebarOpen(true)} className="p-2 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Habit Tracker
-          </h2>
+          <h2 className="text-[14px] font-bold text-slate-100">Habit Tracker</h2>
           <div className="w-10" />
         </header>
 
-        {/* Page Content */}
-        <main className="flex-1 p-6 lg:p-8">
+        {/* Dynamic Outlet with SaaS Rule spacing: p-6 (24px) */}
+        <main className="flex-1 p-6">
           <Outlet />
         </main>
       </div>
+
+      {/* -----------------------------
+          COLUMN 3: RIGHT PANEL (360px)
+          ----------------------------- */}
+      <aside className="hidden xl:flex flex-col shrink-0 w-[360px] h-screen sticky top-0 border-l border-slate-700/50 bg-slate-900/30 overflow-y-auto p-6 custom-scrollbar">
+         
+         <div className="mb-8">
+           <h3 className="text-[20px] font-bold text-slate-100 flex items-center gap-2 tracking-tight">
+             <span className="text-rose-500">⚡</span> Quick Add
+           </h3>
+           <p className="text-[12px] font-medium text-slate-500 mt-1">Captura rápido, ordena luego.</p>
+         </div>
+
+         {/* Fixed Quick-Add Form inside global right panel */}
+         <form onSubmit={handleQuickSubmit} className="flex flex-col gap-4">
+            <div>
+              <input
+                type="text"
+                required
+                placeholder="I need to do..."
+                className="w-full bg-slate-800/80 border border-slate-700 px-4 py-3.5 rounded-[16px] text-[14px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors shadow-inner"
+                value={qsTitle}
+                onChange={e => setQsTitle(e.target.value)}
+              />
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Energía</label>
+                <select
+                  value={qsEnergy}
+                  onChange={e => setQsEnergy(e.target.value)}
+                  className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-4 rounded-[16px] focus:outline-none focus:border-rose-500 transition-colors cursor-pointer"
+                  style={{ appearance: 'none' }}
+                >
+                  <option value="low">🔋 Baja</option>
+                  <option value="medium">⚡ Media</option>
+                  <option value="high">🔥 Alta</option>
+                </select>
+              </div>
+
+              <div className="flex-1">
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">Fecha (Opc.)</label>
+                <input
+                  type="date"
+                  value={qsDate}
+                  onChange={e => setQsDate(e.target.value)}
+                  className="w-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[13px] font-bold py-3 px-3 rounded-[16px] focus:outline-none focus:border-rose-500 transition-colors [&::-webkit-calendar-picker-indicator]:invert-[0.6] cursor-pointer"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={!qsTitle.trim()}
+              className="mt-2 w-full bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-[16px] transition-all duration-300 active:scale-95 shadow-[0_4px_15px_-3px_rgba(244,63,94,0.4)] flex items-center justify-center gap-2 text-[14px]"
+            >
+              Añadir a Bandeja
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+            </button>
+         </form>
+
+         {/* Optional global motivational graphic or padding */}
+         <div className="mt-auto opacity-30 pointer-events-none flex flex-col items-center justify-center pt-20">
+            <svg className="w-48 h-48 text-rose-500/10 blur-xl" viewBox="0 0 100 100" fill="currentColor"><circle cx="50" cy="50" r="50"/></svg>
+         </div>
+
+      </aside>
     </div>
   )
 }
