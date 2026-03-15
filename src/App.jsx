@@ -56,6 +56,7 @@ function App() {
         <Route path="habits" element={<Habits />} />
         <Route path="pomodoro" element={<Pomodoro />} />
         <Route path="estadisticas" element={<DashboardPage />} />
+        <Route path="tareas" element={<Todos />} />
       </Route>
       
       <Route path="*" element={<Navigate to="/" replace />} />

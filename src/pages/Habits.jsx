@@ -180,7 +180,7 @@ export default function Habits() {
   const displayCompleted = Number.isInteger(completedCount) ? completedCount : completedCount.toFixed(1)
 
   return (
-    <div className="animate-fade-in-up max-w-4xl mx-auto pb-12">
+    <div className="animate-fade-in-up max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 mt-4">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
@@ -219,11 +219,11 @@ export default function Habits() {
             <h2 className="text-sm font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--text-secondary)' }}>
               Progreso Global
             </h2>
-            <div className="flex items-end gap-3 mb-4">
+            <div className="flex flex-wrap items-end gap-3 mb-4">
               <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: 'var(--text-primary)' }}>
                 {globalProgress}%
               </span>
-              <span className="text-base font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
+              <span className="text-sm sm:text-base font-semibold mb-1 min-w-max" style={{ color: 'var(--text-secondary)' }}>
                 {displayCompleted} de {totalToday} completados
               </span>
             </div>
