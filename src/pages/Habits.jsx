@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import HabitFormModal, { DAY_LABELS, CATEGORY_COLORS } from '../components/HabitFormModal'
 
@@ -53,6 +53,17 @@ export default function Habits() {
   // Filter habits for today
   const todaysHabits = habits.filter((h) => h.days_of_week?.includes(todayDayIndex))
   const displayedHabits = showAllHabits ? habits : todaysHabits
+
+  // Group displayed habits by category
+  const groupedHabits = useMemo(() => {
+    const groups = {}
+    displayedHabits.forEach(h => {
+      const cat = h.category || 'Otro'
+      if (!groups[cat]) groups[cat] = []
+      groups[cat].push(h)
+    })
+    return groups
+  }, [displayedHabits])
 
   // Create or Update habit
   const handleSave = async (habitData) => {
@@ -154,82 +165,116 @@ export default function Habits() {
     setModalOpen(true)
   }
 
-  // Stats
-  const completedCount = todaysHabits.filter((h) => {
+  // Global Stats
+  const isHabitCompleted = (h) => {
     const log = logsMap.get(h.id)
     const currentCount = log ? log.count : 0
     const target = h.is_counter ? h.target_count || 1 : 1
     return currentCount >= target
-  }).length
+  }
   
+  const completedCount = todaysHabits.filter(isHabitCompleted).length
   const totalToday = todaysHabits.length
+  const globalProgress = totalToday > 0 ? Math.round((completedCount / totalToday) * 100) : 0
 
   return (
-    <div className="animate-fade-in-up max-w-4xl">
+    <div className="animate-fade-in-up max-w-4xl mx-auto pb-12">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-3xl font-black tracking-tight" style={{ color: 'var(--text-primary)' }}>
             Mis Hábitos
           </h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Hoy es <span className="font-semibold" style={{ color: 'var(--accent-primary)' }}>{todayLabel}</span>
-            {' · '}{completedCount}/{totalToday} completados
+          <p className="mt-1 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+            Hoy es <span style={{ color: 'var(--accent-primary)' }}>{todayLabel}</span>
           </p>
         </div>
         <button
           onClick={openCreate}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg active:scale-95 cursor-pointer shrink-0"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl text-white text-sm font-bold transition-all duration-300 hover:scale-105 hover:shadow-lg active:scale-95 cursor-pointer shrink-0"
           style={{
             background: 'var(--accent-gradient)',
-            boxShadow: '0 4px 15px rgba(108, 99, 255, 0.3)',
+            boxShadow: '0 8px 25px rgba(244, 63, 94, 0.3)', // Red shadow
           }}
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
-          Crear Hábito
+          Nuevo Hábito
         </button>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        {[
-          { label: 'Hábitos Totales', value: habits.length, color: '#6c63ff' },
-          { label: 'Hábitos de Hoy', value: totalToday, color: '#e94560' },
-          { label: 'Completados Hoy', value: `${completedCount}/${totalToday}`, color: '#00d2ff' },
-        ].map((stat) => (
-          <div
-            key={stat.label}
-            className="rounded-xl border p-4 backdrop-blur-sm transition-all duration-300 hover:scale-[1.02]"
-            style={{ background: 'var(--glass-bg)', borderColor: 'var(--border-subtle)' }}
-          >
-            <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{stat.label}</p>
-            <p className="text-2xl font-bold" style={{ color: stat.color }}>{stat.value}</p>
+      {/* Global Progress Hero Board */}
+      <div className="mb-10 p-6 sm:p-8 rounded-[2rem] border relative overflow-hidden transition-all duration-500" 
+           style={{ background: 'var(--bg-card)', borderColor: 'var(--border-subtle)', boxShadow: '0 20px 40px -15px rgba(0,0,0,0.5)' }}>
+        
+        {/* Glow effect inside card */}
+        <div className="absolute top-0 right-0 w-64 h-64 rounded-full blur-[80px] pointer-events-none" 
+             style={{ background: 'var(--accent-primary)', opacity: 0.1 }} />
+
+        <div className="relative z-10 flex flex-col md:flex-row gap-6 md:items-center justify-between">
+          <div className="flex-1">
+            <h2 className="text-sm font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--text-secondary)' }}>
+              Progreso Global
+            </h2>
+            <div className="flex items-end gap-3 mb-4">
+              <span className="text-5xl sm:text-6xl font-black leading-none" style={{ color: 'var(--text-primary)' }}>
+                {globalProgress}%
+              </span>
+              <span className="text-base font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
+                {completedCount} de {totalToday} completados
+              </span>
+            </div>
+            
+            {/* Thick Red Progress Bar */}
+            <div className="h-4 w-full rounded-full overflow-hidden" style={{ background: 'rgba(255, 255, 255, 0.05)' }}>
+              <div
+                className="h-full rounded-full transition-all duration-1000 ease-out"
+                style={{
+                  width: `${globalProgress}%`,
+                  background: 'var(--accent-gradient)',
+                  boxShadow: '0 0 20px var(--accent-primary)',
+                }}
+              />
+            </div>
           </div>
-        ))}
+
+          {/* Icon/Motivation */}
+          <div className="hidden md:flex w-24 h-24 rounded-3xl items-center justify-center shrink-0 border"
+               style={{ background: 'rgba(255,255,255,0.02)', borderColor: 'var(--border-subtle)' }}>
+            {globalProgress === 100 ? (
+              <svg className="w-12 h-12" style={{ color: 'var(--accent-primary)' }} fill="currentColor" viewBox="0 0 24 24">
+                <path fillRule="evenodd" d="M12.963 2.286a.75.75 0 00-1.071-.136 9.742 9.742 0 00-3.539 6.177A7.547 7.547 0 016.648 6.61a.75.75 0 00-1.152.082A9 9 0 1015.68 4.534a7.46 7.46 0 01-2.717-2.248zM15.75 14.25a3.75 3.75 0 11-7.313-1.172c.628.465 1.35.81 2.133 1a5.99 5.99 0 011.925-3.545 3.75 3.75 0 013.255 3.717z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              <svg className="w-12 h-12" style={{ color: 'var(--text-secondary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+              </svg>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Filter Toggle */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-2 mb-8 bg-black/20 p-1.5 rounded-2xl w-fit border" style={{ borderColor: 'var(--border-subtle)' }}>
         <button
           onClick={() => setShowAllHabits(false)}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer"
+          className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 cursor-pointer"
           style={{
-            background: !showAllHabits ? 'var(--accent-primary)' + '30' : 'transparent',
-            color: !showAllHabits ? 'var(--accent-primary)' : 'var(--text-secondary)',
-            border: `1px solid ${!showAllHabits ? 'var(--accent-primary)' + '60' : 'var(--border-subtle)'}`,
+            background: !showAllHabits ? 'var(--bg-card)' : 'transparent',
+            color: !showAllHabits ? 'var(--text-primary)' : 'var(--text-secondary)',
+            boxShadow: !showAllHabits ? '0 4px 12px rgba(0,0,0,0.5)' : 'none',
           }}
         >
           Hoy ({todaysHabits.length})
         </button>
         <button
           onClick={() => setShowAllHabits(true)}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer"
+          className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 cursor-pointer"
           style={{
-            background: showAllHabits ? 'var(--accent-primary)' + '30' : 'transparent',
-            color: showAllHabits ? 'var(--accent-primary)' : 'var(--text-secondary)',
-            border: `1px solid ${showAllHabits ? 'var(--accent-primary)' + '60' : 'var(--border-subtle)'}`,
+            background: showAllHabits ? 'var(--bg-card)' : 'transparent',
+            color: showAllHabits ? 'var(--text-primary)' : 'var(--text-secondary)',
+            boxShadow: showAllHabits ? '0 4px 12px rgba(0,0,0,0.5)' : 'none',
           }}
         >
           Todos ({habits.length})
@@ -239,8 +284,8 @@ export default function Habits() {
       {/* Loading */}
       {loading && (
         <div className="flex items-center justify-center py-16">
-          <svg className="animate-spin w-8 h-8" style={{ color: 'var(--accent-primary)' }} viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+          <svg className="animate-spin w-10 h-10" style={{ color: 'var(--accent-primary)' }} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
             <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
           </svg>
         </div>
@@ -249,214 +294,221 @@ export default function Habits() {
       {/* Empty State */}
       {!loading && displayedHabits.length === 0 && (
         <div
-          className="rounded-2xl border p-12 text-center backdrop-blur-sm"
-          style={{ background: 'var(--glass-bg)', borderColor: 'var(--glass-border)' }}
+          className="rounded-[2rem] border p-12 text-center"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-subtle)' }}
         >
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4"
-               style={{ background: 'rgba(108, 99, 255, 0.1)' }}>
-            <svg className="w-8 h-8" style={{ color: 'var(--accent-primary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full mb-6 border"
+               style={{ background: 'rgba(244, 63, 94, 0.05)', borderColor: 'rgba(244, 63, 94, 0.1)' }}>
+            <svg className="w-10 h-10" style={{ color: 'var(--accent-primary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-            {showAllHabits ? 'No tienes hábitos aún' : `No hay hábitos para ${todayLabel}`}
+          <h3 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
+            {showAllHabits ? 'Aún no tienes hábitos' : `No hay hábitos para ${todayLabel}`}
           </h3>
-          <p className="text-sm mb-6 max-w-sm mx-auto" style={{ color: 'var(--text-secondary)' }}>
+          <p className="text-sm mb-8 max-w-sm mx-auto" style={{ color: 'var(--text-secondary)' }}>
             {showAllHabits
-              ? 'Crea tu primer hábito para empezar a rastrear tu progreso.'
-              : 'Crea un hábito que incluya este día o revisa todos tus hábitos.'}
+              ? 'Empieza creando tu primer hábito para construir una mejor rutina.'
+              : 'Disfruta tu día libre o cambia al filtro "Todos" para editar tu semana.'}
           </p>
           <button
             onClick={openCreate}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white text-sm font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg active:scale-95 cursor-pointer"
-            style={{ background: 'var(--accent-gradient)', boxShadow: '0 4px 15px rgba(108, 99, 255, 0.3)' }}
+            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-2xl text-white text-sm font-bold transition-all duration-300 hover:scale-105 hover:shadow-lg active:scale-95 cursor-pointer"
+            style={{ background: 'var(--accent-gradient)', boxShadow: '0 8px 25px rgba(244, 63, 94, 0.3)' }}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Crear Hábito
+            Crear tu primer hábito
           </button>
         </div>
       )}
 
-      {/* Habit Cards */}
+      {/* Categorized Habit Lists */}
       {!loading && displayedHabits.length > 0 && (
-        <div className="space-y-3">
-          {displayedHabits.map((habit) => {
-            const log = logsMap.get(habit.id)
-            const currentCount = log ? log.count : 0
-            const target = habit.is_counter ? habit.target_count || 1 : 1
-            const isCompleted = currentCount >= target
+        <div className="space-y-10">
+          {Object.entries(groupedHabits).map(([categoryName, catHabits]) => {
             
-            const isToggling = togglingId === habit.id
-            const isDeleting = deletingId === habit.id
-            const catColor = CATEGORY_COLORS[habit.category] || '#64748b'
-            const isForToday = habit.days_of_week?.includes(todayDayIndex)
+            // Category Stats
+            const catCompleted = catHabits.filter(isHabitCompleted).length
+            const catTotal = catHabits.length
+            const catProgress = catTotal > 0 ? (catCompleted / catTotal) * 100 : 0
+            const catColor = CATEGORY_COLORS[categoryName] || '#94a3b8'
 
             return (
-              <div
-                key={habit.id}
-                className="group rounded-xl border p-4 backdrop-blur-sm transition-all duration-300 hover:scale-[1.01]"
-                style={{
-                  background: isCompleted ? 'rgba(108, 99, 255, 0.08)' : 'var(--glass-bg)',
-                  borderColor: isCompleted ? 'rgba(108, 99, 255, 0.3)' : 'var(--border-subtle)',
-                  opacity: isDeleting ? 0.5 : 1,
-                }}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  {/* Controls (Checkbox or Counter) */}
-                  {isForToday && (
-                    <div className="shrink-0 flex items-center justify-between sm:justify-start gap-4">
-                      {habit.is_counter ? (
-                        <div className="flex items-center gap-3 bg-white/5 rounded-lg p-1.5 border" style={{ borderColor: 'var(--border-subtle)' }}>
-                          <button
-                            onClick={() => updateLog(habit, currentCount - 1)}
-                            disabled={isToggling || currentCount <= 0}
-                            className="w-6 h-6 flex items-center justify-center rounded bg-white/10 hover:bg-white/20 transition-colors disabled:opacity-30 cursor-pointer font-bold"
-                          >
-                            -
-                          </button>
-                          <div className="flex items-baseline gap-1 min-w-[3rem] justify-center">
-                            <span className="font-bold text-lg leading-none" style={{ color: isCompleted ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
-                              {currentCount}
-                            </span>
-                            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>/ {target}</span>
-                          </div>
-                          <button
-                            onClick={() => updateLog(habit, currentCount + 1)}
-                            disabled={isToggling}
-                            className="w-6 h-6 flex items-center justify-center rounded hover:opacity-80 transition-colors disabled:opacity-30 cursor-pointer text-white font-bold"
-                            style={{ background: isCompleted ? 'var(--accent-primary)' : 'rgba(108, 99, 255, 0.5)' }}
-                          >
-                            +
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => updateLog(habit, isCompleted ? 0 : 1)}
-                          disabled={isToggling}
-                          className="w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-all duration-300 cursor-pointer hover:scale-110 disabled:opacity-50"
-                          style={{
-                            borderColor: isCompleted ? 'var(--accent-primary)' : 'var(--border-subtle)',
-                            background: isCompleted ? 'var(--accent-gradient)' : 'transparent',
-                          }}
-                        >
-                          {isToggling ? (
-                            <svg className="animate-spin w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none">
-                              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
-                              <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
-                            </svg>
-                          ) : isCompleted ? (
-                            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          ) : null}
-                        </button>
-                      )}
-                    </div>
-                  )}
+              <div key={categoryName} className="animate-fade-in-up">
+                {/* Category Header with Mini Progress */}
+                <div className="flex items-center justify-between mb-4 px-2">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+                      {categoryName}
+                    </h3>
+                    <span 
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold"
+                      style={{ background: catColor + '20', color: catColor }}
+                    >
+                      {catCompleted}/{catTotal}
+                    </span>
+                  </div>
+                  {/* Category Mini Progress Bar */}
+                  <div className="hidden sm:block w-32 h-2 rounded-full overflow-hidden bg-black/20">
+                    <div 
+                      className="h-full transition-all duration-1000 ease-out" 
+                      style={{ width: `${catProgress}%`, background: catColor }} 
+                    />
+                  </div>
+                </div>
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className="font-semibold text-sm truncate transition-colors"
+                {/* Cards Grid for this category */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {catHabits.map((habit) => {
+                    const log = logsMap.get(habit.id)
+                    const currentCount = log ? log.count : 0
+                    const target = habit.is_counter ? habit.target_count || 1 : 1
+                    const isCompleted = currentCount >= target
+                    
+                    const isToggling = togglingId === habit.id
+                    const isDeleting = deletingId === habit.id
+                    const isForToday = habit.days_of_week?.includes(todayDayIndex)
+
+                    return (
+                      <div
+                        key={habit.id}
+                        className="group flex flex-col justify-between rounded-2xl border p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
                         style={{
-                          color: isCompleted ? 'var(--accent-primary)' : 'var(--text-primary)',
-                          textDecoration: isCompleted && !habit.is_counter ? 'line-through' : 'none',
-                          opacity: isCompleted ? 0.8 : 1,
+                          background: isCompleted ? 'rgba(244, 63, 94, 0.03)' : 'var(--bg-card)',
+                          borderColor: isCompleted ? 'rgba(244, 63, 94, 0.2)' : 'var(--border-subtle)',
+                          opacity: isDeleting ? 0.5 : 1,
                         }}
                       >
-                        {habit.name}
-                      </span>
-                      <span
-                        className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0"
-                        style={{ background: catColor + '20', color: catColor }}
-                      >
-                        {habit.category}
-                      </span>
-                    </div>
+                        <div className="flex items-start justify-between gap-4 mb-4">
+                          <div className="flex-1 min-w-0 flex items-center gap-3">
+                            {/* Checkbox / Counter Action */}
+                            {isForToday && (
+                              <div className="shrink-0 flex items-center">
+                                {habit.is_counter ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <div className="flex items-center gap-2 bg-black/20 rounded-xl p-1 border" style={{ borderColor: 'var(--border-subtle)' }}>
+                                      <button
+                                        onClick={() => updateLog(habit, currentCount - 1)}
+                                        disabled={isToggling || currentCount <= 0}
+                                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 transition-colors disabled:opacity-30 cursor-pointer font-bold"
+                                      >
+                                        -
+                                      </button>
+                                      <div className="min-w-[2.5rem] text-center">
+                                        <span className="font-bold text-sm" style={{ color: isCompleted ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
+                                          {currentCount}
+                                        </span>
+                                        <span className="text-[10px] ml-0.5" style={{ color: 'var(--text-secondary)' }}>/{target}</span>
+                                      </div>
+                                      <button
+                                        onClick={() => updateLog(habit, currentCount + 1)}
+                                        disabled={isToggling}
+                                        className="w-7 h-7 flex items-center justify-center rounded-lg hover:opacity-80 transition-colors disabled:opacity-30 cursor-pointer text-white font-black"
+                                        style={{ background: isCompleted ? 'var(--accent-primary)' : 'rgba(244, 63, 94, 0.5)' }}
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => updateLog(habit, isCompleted ? 0 : 1)}
+                                    disabled={isToggling}
+                                    className="w-8 h-8 rounded-xl border-2 flex items-center justify-center transition-all duration-300 cursor-pointer hover:scale-110 disabled:opacity-50 shadow-inner"
+                                    style={{
+                                      borderColor: isCompleted ? 'var(--accent-primary)' : 'var(--border-subtle)',
+                                      background: isCompleted ? 'var(--accent-gradient)' : 'rgba(0,0,0,0.2)',
+                                    }}
+                                  >
+                                    {isToggling ? (
+                                      <svg className="animate-spin w-4 h-4 text-white" viewBox="0 0 24 24" fill="none">
+                                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                                        <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
+                                      </svg>
+                                    ) : isCompleted ? (
+                                      <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    ) : null}
+                                  </button>
+                                )}
+                              </div>
+                            )}
 
-                    {/* Day pills */}
-                    <div className="flex gap-1">
-                      {DAY_LABELS.map((label, idx) => {
-                        const isActive = habit.days_of_week?.includes(idx)
-                        const isTodayDay = idx === todayDayIndex
-                        return (
-                          <span
-                            key={idx}
-                            className="w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold"
-                            style={{
-                              background: isActive
-                                ? isTodayDay
-                                  ? 'var(--accent-primary)'
-                                  : 'rgba(108, 99, 255, 0.2)'
-                                : 'rgba(255, 255, 255, 0.03)',
-                              color: isActive
-                                ? isTodayDay
-                                  ? '#ffffff'
-                                  : 'var(--accent-primary)'
-                                : 'var(--text-secondary)',
-                              opacity: isActive ? 1 : 0.3,
-                            }}
-                          >
-                            {label}
-                          </span>
-                        )
-                      })}
-                    </div>
-                  </div>
+                            <div>
+                              <span
+                                className="font-bold text-base block transition-colors leading-tight"
+                                style={{
+                                  color: isCompleted ? 'var(--accent-primary)' : 'var(--text-primary)',
+                                  textDecoration: isCompleted && !habit.is_counter ? 'line-through' : 'none',
+                                  opacity: isCompleted && !habit.is_counter ? 0.7 : 1,
+                                }}
+                              >
+                                {habit.name}
+                              </span>
+                            </div>
+                          </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-200 justify-end">
-                    <button
-                      onClick={() => openEdit(habit)}
-                      className="p-2 rounded-lg transition-colors hover:bg-white/10 cursor-pointer"
-                      style={{ color: 'var(--text-secondary)' }}
-                      title="Editar"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={() => handleDelete(habit.id)}
-                      disabled={isDeleting}
-                      className="p-2 rounded-lg transition-colors hover:bg-red-500/20 cursor-pointer"
-                      style={{ color: '#e94560' }}
-                      title="Eliminar"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                      </svg>
-                    </button>
-                  </div>
+                          {/* Actions (Edit / Delete) */}
+                          <div className="flex items-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <button
+                              onClick={() => openEdit(habit)}
+                              className="p-1.5 rounded-lg transition-colors hover:bg-white/10 cursor-pointer"
+                              style={{ color: 'var(--text-secondary)' }}
+                              title="Editar"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDelete(habit.id)}
+                              disabled={isDeleting}
+                              className="p-1.5 rounded-lg transition-colors hover:bg-red-500/20 cursor-pointer"
+                              style={{ color: 'var(--accent-primary)' }}
+                              title="Eliminar"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Day Pills Footer */}
+                        <div className="flex gap-1.5 mt-auto pt-2 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+                          {DAY_LABELS.map((label, idx) => {
+                            const isActive = habit.days_of_week?.includes(idx)
+                            const isTodayDay = idx === todayDayIndex
+                            return (
+                              <span
+                                key={idx}
+                                className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black"
+                                style={{
+                                  background: isActive
+                                    ? isTodayDay
+                                      ? 'var(--accent-primary)'
+                                      : 'rgba(255, 255, 255, 0.1)'
+                                    : 'transparent',
+                                  color: isActive
+                                    ? isTodayDay
+                                      ? '#ffffff'
+                                      : 'var(--text-primary)'
+                                    : 'var(--text-secondary)',
+                                  opacity: isActive ? 1 : 0.3,
+                                }}
+                              >
+                                {label}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )
           })}
-        </div>
-      )}
-
-      {/* Progress Bar (bottom) */}
-      {!loading && totalToday > 0 && (
-        <div className="mt-6 rounded-xl border p-4" style={{ background: 'var(--glass-bg)', borderColor: 'var(--border-subtle)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Progreso de hoy</span>
-            <span className="text-xs font-bold" style={{ color: 'var(--accent-primary)' }}>
-              {totalToday > 0 ? Math.round((completedCount / totalToday) * 100) : 0}%
-            </span>
-          </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255, 255, 255, 0.05)' }}>
-            <div
-              className="h-full rounded-full transition-all duration-700 ease-out"
-              style={{
-                width: `${totalToday > 0 ? (completedCount / totalToday) * 100 : 0}%`,
-                background: 'var(--accent-gradient)',
-                boxShadow: '0 0 10px rgba(108, 99, 255, 0.4)',
-              }}
-            />
-          </div>
         </div>
       )}
 
