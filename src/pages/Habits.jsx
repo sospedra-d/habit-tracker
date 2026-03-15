@@ -442,8 +442,8 @@ export default function Habits() {
                                 className="font-bold text-base block transition-colors leading-tight"
                                 style={{
                                   color: isCompleted ? 'var(--accent-primary)' : 'var(--text-primary)',
-                                  textDecoration: isCompleted && !habit.is_counter ? 'line-through' : 'none',
-                                  opacity: isCompleted && !habit.is_counter ? 0.7 : 1,
+                                  textDecoration: isCompleted ? 'line-through' : 'none',
+                                  opacity: isCompleted ? 0.7 : 1,
                                 }}
                               >
                                 {habit.name}
