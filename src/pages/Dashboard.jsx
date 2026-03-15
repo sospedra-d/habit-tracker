@@ -10,34 +10,28 @@ import {
   Cell
 } from 'recharts'
 
+// Generate dates once outside the component to prevent infinite dependency loops
+const generateDays = (count) => {
+  const days = []
+  const today = new Date()
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(today)
+    d.setDate(today.getDate() - i)
+    days.push(d.toISOString().split('T')[0])
+  }
+  return days
+}
+
+const STATIC_LAST_7_DAYS = generateDays(7)
+const STATIC_LAST_90_DAYS = generateDays(90)
+
 export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [logs, setLogs] = useState([])
   const [pomodoroLogs, setPomodoroLogs] = useState([])
 
-  const today = new Date()
-
-  // Generate last 7 days for the Bar Chart
-  const last7Days = useMemo(() => {
-    const days = []
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(today.getDate() - i)
-      days.push(d.toISOString().split('T')[0])
-    }
-    return days
-  }, [today])
-
-  // Generate last 90 days for the Heatmap (12 weeks)
-  const last90Days = useMemo(() => {
-    const days = []
-    for (let i = 89; i >= 0; i--) {
-      const d = new Date()
-      d.setDate(today.getDate() - i)
-      days.push(d.toISOString().split('T')[0])
-    }
-    return days
-  }, [today])
+  const last7Days = STATIC_LAST_7_DAYS
+  const last90Days = STATIC_LAST_90_DAYS
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -212,7 +206,7 @@ export default function Dashboard() {
                     />
                     <Bar dataKey="completados" name="Completados" radius={[6, 6, 6, 6]}>
                       {weeklyData.map((entry, index) => {
-                        const isToday = entry.dateStr === today.toISOString().split('T')[0]
+                        const isToday = entry.dateStr === last7Days[last7Days.length - 1]
                         return <Cell key={`cell-${index}`} fill={isToday ? '#f43f5e' : '#334155'} />
                       })}
                     </Bar>

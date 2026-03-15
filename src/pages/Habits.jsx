@@ -166,16 +166,18 @@ export default function Habits() {
   }
 
   // Global Stats
-  const isHabitCompleted = (h) => {
+  const getHabitProgress = (h) => {
     const log = logsMap.get(h.id)
     const currentCount = log ? log.count : 0
     const target = h.is_counter ? h.target_count || 1 : 1
-    return currentCount >= target
+    return Math.min(currentCount / target, 1)
   }
   
-  const completedCount = todaysHabits.filter(isHabitCompleted).length
+  const completedCount = todaysHabits.reduce((sum, h) => sum + getHabitProgress(h), 0)
   const totalToday = todaysHabits.length
   const globalProgress = totalToday > 0 ? Math.round((completedCount / totalToday) * 100) : 0
+  
+  const displayCompleted = Number.isInteger(completedCount) ? completedCount : completedCount.toFixed(1)
 
   return (
     <div className="animate-fade-in-up max-w-4xl mx-auto pb-12">
@@ -222,7 +224,7 @@ export default function Habits() {
                 {globalProgress}%
               </span>
               <span className="text-base font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
-                {completedCount} de {totalToday} completados
+                {displayCompleted} de {totalToday} completados
               </span>
             </div>
             
@@ -327,10 +329,11 @@ export default function Habits() {
           {Object.entries(groupedHabits).map(([categoryName, catHabits]) => {
             
             // Category Stats
-            const catCompleted = catHabits.filter(isHabitCompleted).length
+            const catCompleted = catHabits.reduce((sum, h) => sum + getHabitProgress(h), 0)
             const catTotal = catHabits.length
             const catProgress = catTotal > 0 ? (catCompleted / catTotal) * 100 : 0
             const catColor = CATEGORY_COLORS[categoryName] || '#94a3b8'
+            const displayCatCompleted = Number.isInteger(catCompleted) ? catCompleted : catCompleted.toFixed(1)
 
             return (
               <div key={categoryName} className="animate-fade-in-up">
@@ -344,7 +347,7 @@ export default function Habits() {
                       className="px-2.5 py-1 rounded-lg text-xs font-bold"
                       style={{ background: catColor + '20', color: catColor }}
                     >
-                      {catCompleted}/{catTotal}
+                      {displayCatCompleted}/{catTotal}
                     </span>
                   </div>
                   {/* Category Mini Progress Bar */}
