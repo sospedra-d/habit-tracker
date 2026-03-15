@@ -17,6 +17,8 @@ export default function HabitFormModal({ isOpen, onClose, onSave, editingHabit }
   const [name, setName] = useState('')
   const [category, setCategory] = useState('Salud')
   const [selectedDays, setSelectedDays] = useState([])
+  const [isCounter, setIsCounter] = useState(false)
+  const [targetCount, setTargetCount] = useState(1)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -24,10 +26,14 @@ export default function HabitFormModal({ isOpen, onClose, onSave, editingHabit }
       setName(editingHabit.name)
       setCategory(editingHabit.category || 'Salud')
       setSelectedDays(editingHabit.days_of_week || [])
+      setIsCounter(editingHabit.is_counter || false)
+      setTargetCount(editingHabit.target_count || 1)
     } else {
       setName('')
       setCategory('Salud')
       setSelectedDays([])
+      setIsCounter(false)
+      setTargetCount(1)
     }
   }, [editingHabit, isOpen])
 
@@ -41,7 +47,14 @@ export default function HabitFormModal({ isOpen, onClose, onSave, editingHabit }
     e.preventDefault()
     if (!name.trim() || selectedDays.length === 0) return
     setSaving(true)
-    await onSave({ name: name.trim(), category, days_of_week: selectedDays, id: editingHabit?.id })
+    await onSave({ 
+      name: name.trim(), 
+      category, 
+      days_of_week: selectedDays, 
+      is_counter: isCounter,
+      target_count: isCounter ? Number(targetCount) : 1,
+      id: editingHabit?.id 
+    })
     setSaving(false)
     onClose()
   }
@@ -99,6 +112,43 @@ export default function HabitFormModal({ isOpen, onClose, onSave, editingHabit }
               autoFocus
             />
           </div>
+
+          {/* Type of Habit (Normal vs Counter) */}
+          <div className="flex items-center justify-between p-3 rounded-xl border" style={{ borderColor: 'var(--border-subtle)', background: 'rgba(255, 255, 255, 0.02)' }}>
+            <div>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Hábito con contador</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Ej: Vasos de agua, páginas leídas</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsCounter(!isCounter)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${isCounter ? 'bg-[#6c63ff]' : 'bg-gray-600'}`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isCounter ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+
+          {/* Target Count Input (only if isCounter) */}
+          {isCounter && (
+            <div className="animate-fade-in-up">
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+                Meta diaria
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={targetCount}
+                onChange={(e) => setTargetCount(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl text-sm transition-all duration-300 focus:outline-none focus:ring-2"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--border-subtle)',
+                  color: 'var(--text-primary)',
+                  '--tw-ring-color': 'var(--accent-primary)',
+                }}
+              />
+            </div>
+          )}
 
           {/* Category */}
           <div>

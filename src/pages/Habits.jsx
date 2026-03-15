@@ -4,7 +4,7 @@ import HabitFormModal, { DAY_LABELS, CATEGORY_COLORS } from '../components/Habit
 
 export default function Habits() {
   const [habits, setHabits] = useState([])
-  const [completedIds, setCompletedIds] = useState(new Set())
+  const [logsMap, setLogsMap] = useState(new Map())
   const [loading, setLoading] = useState(true)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingHabit, setEditingHabit] = useState(null)
@@ -32,13 +32,13 @@ export default function Habits() {
 
       const { data: logs, error: lErr } = await supabase
         .from('habit_logs')
-        .select('habit_id')
+        .select('habit_id, count')
         .eq('completed_at', todayStr)
 
       if (lErr) throw lErr
 
       setHabits(allHabits || [])
-      setCompletedIds(new Set((logs || []).map((l) => l.habit_id)))
+      setLogsMap(new Map((logs || []).map((l) => [l.habit_id, l])))
     } catch (err) {
       console.error('Error fetching data:', err)
     } finally {
@@ -55,23 +55,38 @@ export default function Habits() {
   const displayedHabits = showAllHabits ? habits : todaysHabits
 
   // Create or Update habit
-  const handleSave = async ({ id, name, category, days_of_week }) => {
+  const handleSave = async (habitData) => {
     try {
-      if (id) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("No hay usuario autenticado")
+
+      const payload = { 
+        ...habitData, 
+        user_id: user.id 
+      }
+
+      if (payload.id) {
         const { error } = await supabase
           .from('habits')
-          .update({ name, category, days_of_week })
-          .eq('id', id)
+          .update({
+            name: payload.name,
+            category: payload.category,
+            days_of_week: payload.days_of_week,
+            is_counter: payload.is_counter,
+            target_count: payload.target_count
+          })
+          .eq('id', payload.id)
         if (error) throw error
       } else {
         const { error } = await supabase
           .from('habits')
-          .insert([{ name, category, days_of_week }])
+          .insert([payload])
         if (error) throw error
       }
       await fetchData()
     } catch (err) {
       console.error('Error saving habit:', err)
+      alert("Hubo un error al guardar el hábito. Si acabas de actualizar la base de datos, intenta refrescar la página.")
     }
   }
 
@@ -89,32 +104,39 @@ export default function Habits() {
     }
   }
 
-  // Toggle completion
-  const toggleComplete = async (habitId) => {
-    setTogglingId(habitId)
-    const isCompleted = completedIds.has(habitId)
+  // Update Log (Toggle or Counter increment/decrement)
+  const updateLog = async (habit, newCount) => {
+    setTogglingId(habit.id)
     try {
-      if (isCompleted) {
+      if (newCount <= 0) {
         const { error } = await supabase
           .from('habit_logs')
           .delete()
-          .eq('habit_id', habitId)
+          .eq('habit_id', habit.id)
           .eq('completed_at', todayStr)
         if (error) throw error
-        setCompletedIds((prev) => {
-          const next = new Set(prev)
-          next.delete(habitId)
+        
+        setLogsMap((prev) => {
+          const next = new Map(prev)
+          next.delete(habit.id)
           return next
         })
       } else {
         const { error } = await supabase
           .from('habit_logs')
-          .insert([{ habit_id: habitId, completed_at: todayStr }])
+          .upsert([
+            { habit_id: habit.id, completed_at: todayStr, count: newCount }
+          ], { onConflict: 'habit_id, completed_at' })
         if (error) throw error
-        setCompletedIds((prev) => new Set(prev).add(habitId))
+
+        setLogsMap((prev) => {
+          const next = new Map(prev)
+          next.set(habit.id, { habit_id: habit.id, count: newCount })
+          return next
+        })
       }
     } catch (err) {
-      console.error('Error toggling completion:', err)
+      console.error('Error updating log:', err)
     } finally {
       setTogglingId(null)
     }
@@ -131,7 +153,14 @@ export default function Habits() {
     setModalOpen(true)
   }
 
-  const completedCount = todaysHabits.filter((h) => completedIds.has(h.id)).length
+  // Stats
+  const completedCount = todaysHabits.filter((h) => {
+    const log = logsMap.get(h.id)
+    const currentCount = log ? log.count : 0
+    const target = h.is_counter ? h.target_count || 1 : 1
+    return currentCount >= target
+  }).length
+  
   const totalToday = todaysHabits.length
 
   return (
@@ -253,7 +282,11 @@ export default function Habits() {
       {!loading && displayedHabits.length > 0 && (
         <div className="space-y-3">
           {displayedHabits.map((habit) => {
-            const isCompleted = completedIds.has(habit.id)
+            const log = logsMap.get(habit.id)
+            const currentCount = log ? log.count : 0
+            const target = habit.is_counter ? habit.target_count || 1 : 1
+            const isCompleted = currentCount >= target
+            
             const isToggling = togglingId === habit.id
             const isDeleting = deletingId === habit.id
             const catColor = CATEGORY_COLORS[habit.category] || '#64748b'
@@ -269,39 +302,67 @@ export default function Habits() {
                   opacity: isDeleting ? 0.5 : 1,
                 }}
               >
-                <div className="flex items-center gap-4">
-                  {/* Checkbox */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  {/* Controls (Checkbox or Counter) */}
                   {isForToday && (
-                    <button
-                      onClick={() => toggleComplete(habit.id)}
-                      disabled={isToggling}
-                      className="shrink-0 w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-all duration-300 cursor-pointer hover:scale-110 disabled:opacity-50"
-                      style={{
-                        borderColor: isCompleted ? 'var(--accent-primary)' : 'var(--border-subtle)',
-                        background: isCompleted ? 'var(--accent-gradient)' : 'transparent',
-                      }}
-                    >
-                      {isToggling ? (
-                        <svg className="animate-spin w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none">
-                          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
-                          <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
-                        </svg>
-                      ) : isCompleted ? (
-                        <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      ) : null}
-                    </button>
+                    <div className="shrink-0 flex items-center justify-between sm:justify-start gap-4">
+                      {habit.is_counter ? (
+                        <div className="flex items-center gap-3 bg-white/5 rounded-lg p-1.5 border" style={{ borderColor: 'var(--border-subtle)' }}>
+                          <button
+                            onClick={() => updateLog(habit, currentCount - 1)}
+                            disabled={isToggling || currentCount <= 0}
+                            className="w-6 h-6 flex items-center justify-center rounded bg-white/10 hover:bg-white/20 transition-colors disabled:opacity-30 cursor-pointer font-bold"
+                          >
+                            -
+                          </button>
+                          <div className="flex items-baseline gap-1 min-w-[3rem] justify-center">
+                            <span className="font-bold text-lg leading-none" style={{ color: isCompleted ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
+                              {currentCount}
+                            </span>
+                            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>/ {target}</span>
+                          </div>
+                          <button
+                            onClick={() => updateLog(habit, currentCount + 1)}
+                            disabled={isToggling}
+                            className="w-6 h-6 flex items-center justify-center rounded hover:opacity-80 transition-colors disabled:opacity-30 cursor-pointer text-white font-bold"
+                            style={{ background: isCompleted ? 'var(--accent-primary)' : 'rgba(108, 99, 255, 0.5)' }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => updateLog(habit, isCompleted ? 0 : 1)}
+                          disabled={isToggling}
+                          className="w-7 h-7 rounded-lg border-2 flex items-center justify-center transition-all duration-300 cursor-pointer hover:scale-110 disabled:opacity-50"
+                          style={{
+                            borderColor: isCompleted ? 'var(--accent-primary)' : 'var(--border-subtle)',
+                            background: isCompleted ? 'var(--accent-gradient)' : 'transparent',
+                          }}
+                        >
+                          {isToggling ? (
+                            <svg className="animate-spin w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none">
+                              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+                              <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
+                            </svg>
+                          ) : isCompleted ? (
+                            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          ) : null}
+                        </button>
+                      )}
+                    </div>
                   )}
 
                   {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span
-                        className="font-semibold text-sm truncate"
+                        className="font-semibold text-sm truncate transition-colors"
                         style={{
                           color: isCompleted ? 'var(--accent-primary)' : 'var(--text-primary)',
-                          textDecoration: isCompleted ? 'line-through' : 'none',
+                          textDecoration: isCompleted && !habit.is_counter ? 'line-through' : 'none',
                           opacity: isCompleted ? 0.8 : 1,
                         }}
                       >
@@ -346,7 +407,7 @@ export default function Habits() {
                   </div>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-200 justify-end">
                     <button
                       onClick={() => openEdit(habit)}
                       className="p-2 rounded-lg transition-colors hover:bg-white/10 cursor-pointer"
@@ -408,3 +469,4 @@ export default function Habits() {
     </div>
   )
 }
+
