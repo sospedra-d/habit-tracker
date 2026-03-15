@@ -4,8 +4,8 @@ import { supabase } from '../supabaseClient'
 
 export default function Login() {
   const navigate = useNavigate()
-  const [email, setEmail] = useState('dani')
-  const [password, setPassword] = useState('dani1234')
+  const [email, setEmail] = useState('dani@example.com')
+  const [password, setPassword] = useState('dani123')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)

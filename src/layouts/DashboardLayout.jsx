@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { supabase } from '../supabaseClient'
 
 const navItems = [
   {
@@ -99,8 +100,12 @@ export default function DashboardLayout() {
         {/* Sidebar Footer */}
         <div className="px-3 py-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
           <button
-            onClick={() => navigate('/login')}
+            onClick={async () => {
+              await supabase.auth.signOut()
+              navigate('/login')
+            }}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 hover:scale-[1.02] cursor-pointer"
+
             style={{ color: 'var(--text-secondary)' }}
             onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(233, 69, 96, 0.1)'}
             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
