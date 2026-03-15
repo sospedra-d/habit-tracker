@@ -78,6 +78,7 @@ export default function Habits() {
           .eq('id', payload.id)
         if (error) throw error
       } else {
+        delete payload.id;
         const { error } = await supabase
           .from('habits')
           .insert([payload])
