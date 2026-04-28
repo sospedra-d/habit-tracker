@@ -1,21 +1,51 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '../supabaseClient'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
+import { getChallengeStatus } from '../utils/challenge'
+
+// Frases motivacionales
+const phrases = {
+  "0-2": ["Vamos, empieza el día", "Un pequeño paso es un gran comienzo", "Cada acción cuenta"],
+  "3-5": ["Buen comienzo, sigue así", "Ya vamos sumando", "Tus hábitos van tomando fuerza"],
+  "6-8": ["¡Día productivo!", "Estás en la zona", "Cada acción cuenta"],
+  "9-11": ["¡Estás en racha!", "Imparable hoy", "¡Sigue así, casi en la cima!"],
+  "12-14": ["¡Día Épico!", "Nivel de productividad alto", "Hoy estás on fire"],
+  "15+": ["¡Día Legendario! 🏆", "Has dominado el día"]
+}
+
+function getDailyMessage(total) {
+  if (total <= 2) return phrases["0-2"][Math.floor(Math.random() * phrases["0-2"].length)]
+  if (total <= 5) return phrases["3-5"][Math.floor(Math.random() * phrases["3-5"].length)]
+  if (total <= 8) return phrases["6-8"][Math.floor(Math.random() * phrases["6-8"].length)]
+  if (total <= 11) return phrases["9-11"][Math.floor(Math.random() * phrases["9-11"].length)]
+  if (total <= 14) return phrases["12-14"][Math.floor(Math.random() * phrases["12-14"].length)]
+  return phrases["15+"][Math.floor(Math.random() * phrases["15+"].length)]
+}
 
 export default function Today() {
   const [loading, setLoading] = useState(true)
   const [todos, setTodos] = useState([])
+  const [completedTodosCount, setCompletedTodosCount] = useState(0)
   const [habits, setHabits] = useState([])
   const [habitLogs, setHabitLogs] = useState([])
-  const [pomodoros, setPomodoros] = useState([])
+  const [challengeLogs, setChallengeLogs] = useState([])
+  const [fadingHabits, setFadingHabits] = useState(new Set())
+  const [hiddenHabits, setHiddenHabits] = useState(new Set())
+  const [celebratingIds, setCelebratingIds] = useState(new Set())
+  const [completingChallengeIds, setCompletingChallengeIds] = useState(new Set())
+  const [allCoreCelebration, setAllCoreCelebration] = useState(false)
+  const [legendaryCelebration, setLegendaryCelebration] = useState(false)
+  const [energySelector, setEnergySelector] = useState(null)
+  const [focusIndex, setFocusIndex] = useState(0)
+  const [poppingCheckId, setPoppingCheckId] = useState(null)
+  const prevCoreCompleteRef = useRef(false)
+  const prevLegendaryRef = useRef(false)
+  const prevProdRef = useRef(null)
+  const [prodFlip, setProdFlip] = useState(false)
 
   const navigate = useNavigate()
 
-  const todayStr = useMemo(() => {
-    const d = new Date()
-    return d.toISOString().split('T')[0]
-  }, [])
-  
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
   const dayOfWeekIndex = new Date(todayStr + "T00:00:00").getDay()
 
   const fetchData = useCallback(async () => {
@@ -24,22 +54,81 @@ export default function Today() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // Fetch Todos
-      const { data: tData } = await supabase.from('todos').select('*').eq('is_completed', false)
+      // BUG 1 FIX: fetch ALL non-completed todos without extra filters
+      const { data: tData, error: tErr } = await supabase
+        .from('todos')
+        .select('*')
+        .eq('is_completed', false)
+      if (tErr) console.error('Todos fetch error:', tErr)
+      console.log('[Today] Fetched pending todos:', tData?.length, tData)
       setTodos(tData || [])
 
-      // Fetch Habits
+      const todayStart = `${todayStr}T00:00:00Z`
+      const { count } = await supabase
+        .from('todos')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_completed', true)
+        .gte('completed_at', todayStart)
+      setCompletedTodosCount(count || 0)
+
       const { data: hData } = await supabase.from('habits').select('*')
       setHabits(hData || [])
 
-      // Fetch Habit Logs for Today
       const { data: hlData } = await supabase.from('habit_logs').select('*').eq('completed_at', todayStr)
       setHabitLogs(hlData || [])
 
-      // Fetch Pomodoros for Today
-      const { data: pData } = await supabase.from('pomodoro_logs').select('*').gte('completed_at', `${todayStr}T00:00:00Z`)
-      setPomodoros(pData || [])
+      const activeChallengeHabits = (hData || []).filter(h => h.challenge_active)
+      let allChallengeLogs = []
+      if (activeChallengeHabits.length > 0) {
+        const hids = activeChallengeHabits.map(h => h.id)
+        const oldestTs = Math.min(...activeChallengeHabits.map(h => {
+          return h.challenge_started_at ? new Date(h.challenge_started_at).getTime() : Date.now()
+        }))
+        const safeTs = isNaN(oldestTs) ? Date.now() : oldestTs
+        const oldestDateStr = new Date(safeTs).toISOString().split('T')[0]
+        
+        const { data: clData, error: clErr } = await supabase
+          .from('habit_logs')
+          .select('habit_id, completed_at, count')
+          .in('habit_id', hids)
+          .gte('completed_at', oldestDateStr)
+        if (!clErr) allChallengeLogs = clData || []
+      }
+      setChallengeLogs(allChallengeLogs)
 
+      // Auto-deactivation (24h expired) and auto-completion
+      const deactivateIds = []
+      const completedChallenges = []
+
+      activeChallengeHabits.forEach(h => {
+        const status = getChallengeStatus(h, allChallengeLogs, todayStr)
+        if (status.needsDeactivation) {
+          deactivateIds.push(h.id)
+        } else if (status.isCompleted) {
+          completedChallenges.push(h)
+        }
+      })
+
+      if (deactivateIds.length > 0) {
+        await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds)
+        setHabits(prev => prev.map(h => deactivateIds.includes(h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h))
+      }
+
+      if (completedChallenges.length > 0 && user) {
+        for (const h of completedChallenges) {
+          await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id)
+          await supabase.from('achievements').insert([{
+            user_id: user.id,
+            type: 'habit_challenge',
+            name: h.name,
+            achieved_at: new Date().toISOString()
+          }])
+        }
+        setHabits(prev => prev.map(h => completedChallenges.some(c => c.id === h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h))
+      }
+
+      // BUG 2 FIX: Only auto-delete completed tasks older than 24h, NOT by due_date
+      // (the old logic deleted by due_date which was too aggressive)
     } catch (err) {
       console.error('Error fetching today data:', err)
     } finally {
@@ -47,126 +136,99 @@ export default function Today() {
     }
   }, [todayStr])
 
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
+  useEffect(() => { fetchData() }, [fetchData])
 
-  // --- TODOS LOGIC ---
-  const { hacerAhora, recomendadoTareas } = useMemo(() => {
+  // --- TODOS: Urgent tasks (≤3 days or overdue) ---
+  const hacerAhora = useMemo(() => {
     const today = new Date(todayStr + "T00:00:00")
     const urgentDate = new Date(today)
     urgentDate.setDate(today.getDate() + 3)
-
-    const urgent = []
-    const rec = []
-
-    const sorted = [...todos].sort((a, b) => {
-      if (!a.due_date && !b.due_date) return 0
-      if (!a.due_date) return 1
-      if (!b.due_date) return -1
-      return new Date(a.due_date) - new Date(b.due_date)
-    })
-
-    sorted.forEach(t => {
-      if (!t.due_date) {
-        rec.push(t)
-      } else {
-         const due = new Date(t.due_date + "T00:00:00")
-         if (due <= urgentDate) urgent.push(t)
-         else rec.push(t)
-      }
-    })
-    return { hacerAhora: urgent, recomendadoTareas: rec }
+    return [...todos]
+      .filter(t => t.due_date && new Date(t.due_date + "T00:00:00") <= urgentDate)
+      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
   }, [todos, todayStr])
 
-  const completeTodo = async (id) => {
-    try {
-      const { error } = await supabase.from('todos').update({ is_completed: true }).eq('id', id)
-      if (error) {
-        alert("Error al completar tarea: " + error.message)
-        return
-      }
-      setTodos(prev => prev.filter(t => t.id !== id))
-      window.location.reload() // Force sync across widgets
-    } catch (err) { 
-      console.error(err)
-      alert("Error inesperado al completar tarea.")
+  // --- BUG 3 FIX: energy → energy_level mapping ---
+  const focusPool = useMemo(() => {
+    // Priority 1: critical tasks (≤3d/overdue)
+    const criticalPending = hacerAhora.filter(t => !t.is_completed)
+    if (criticalPending.length > 0) return { tasks: criticalPending, type: 'critica' }
+
+    // Priority 2: filter by selected energy — maps to energy_level field
+    if (energySelector) {
+      const energyTasks = todos.filter(t => {
+        if (t.is_completed) return false
+        const level = t.energy_level || 'low'
+        if (energySelector === 'high') return level === 'high'
+        if (energySelector === 'medium') return level === 'medium'
+        // low = low priority + inbox (no date)
+        return level === 'low'
+      })
+      if (energyTasks.length > 0) return { tasks: energyTasks, type: 'energia' }
+    }
+
+    // Priority 3: any pending task
+    const allPending = todos.filter(t => !t.is_completed)
+    if (allPending.length > 0) return { tasks: allPending, type: 'pendiente' }
+
+    return { tasks: [], type: 'none' }
+  }, [hacerAhora, todos, energySelector])
+
+  const currentFocusTask = focusPool.tasks.length > 0
+    ? focusPool.tasks[focusIndex % focusPool.tasks.length]
+    : null
+
+  const cycleFocus = () => {
+    if (focusPool.tasks.length > 1) {
+      setFocusIndex(prev => (prev + 1) % focusPool.tasks.length)
     }
   }
 
-  // --- HABITS SMART LOGIC (Algorithm with Mocks) ---
-  const { todaysHabits, recommendedHabits } = useMemo(() => {
-    // 1. Filter today's habits
-    const todayList = habits.filter(h => {
-      // If no days selected, assume every day (legacy) or check days_of_week
+  // Reset focusIndex when energy changes
+  useEffect(() => { setFocusIndex(0) }, [energySelector])
+
+  const completeTodo = async (id) => {
+    try {
+      // BUG 2 FIX: set completed_at so ✓ Hoy tab can track 24h window
+      const { error } = await supabase
+        .from('todos')
+        .update({ is_completed: true, completed_at: new Date().toISOString() })
+        .eq('id', id)
+      if (error) { alert("Error: " + error.message); return }
+      setCelebratingIds(prev => new Set([...prev, `todo-${id}`]))
+      setTimeout(() => {
+        setCelebratingIds(prev => { const n = new Set(prev); n.delete(`todo-${id}`); return n })
+        setTodos(prev => prev.filter(t => t.id !== id))
+        setCompletedTodosCount(prev => prev + 1)
+        setFocusIndex(0)
+      }, 500)
+    } catch (err) { console.error(err) }
+  }
+
+  // --- HABITS logic ---
+  const handleChallengeCompletion = async (habit) => {
+    try {
+      setCompletingChallengeIds(prev => new Set([...prev, habit.id]))
+      const { error } = await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', habit.id)
+      if (error) console.error(error)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.from('achievements').insert([{
+          user_id: user.id,
+          type: 'habit_challenge',
+          name: habit.name,
+          achieved_at: new Date().toISOString()
+        }])
+      }
+    } catch(err) { console.error(err) }
+  }
+
+  const todaysHabits = useMemo(() => {
+    return habits.filter(h => {
       if (!h.days_of_week) return true
       if (Array.isArray(h.days_of_week) && h.days_of_week.length === 0) return true
       return h.days_of_week.includes(dayOfWeekIndex)
     })
-
-    // 2. Build Mock Histories & Algorithm for Recommendations
-    // Rule: Muestra primero los débiles (2/3), luego los fuertes (1/3)
-    const MAX_REC = 6
-    const WEAK_MAX = Math.floor(MAX_REC * (2/3)) // 4
-    const STRONG_MAX = MAX_REC - WEAK_MAX // 2
-
-    // Inject mock history
-    const analyzed = habits.map((h, i) => {
-      // Seed random consistency based on ID to remain somewhat stable per render
-      const seed = h.name.length % 10
-      const baseConsistency = seed > 5 ? 0.8 : 0.3 // 50/50 split of naturally strong/weak
-      
-      const history = []
-      let trueCount = 0
-      let currentStreak = 0
-
-      // Generate 30 days
-      for(let d=0; d<30; d++) {
-         const isDone = Math.random() < baseConsistency
-         history.push(isDone)
-         if (isDone) trueCount++
-      }
-      
-      // Calculate streak from back
-      for(let d=29; d>=0; d--) {
-         if (history[d]) currentStreak++
-         else break
-      }
-
-      const consistencyPct = Math.round((trueCount / 30) * 100)
-      const isWeak = consistencyPct < 60
-
-      return {
-        ...h,
-        mockHistory: history,
-        consistencyPct,
-        currentStreak,
-        isWeak
-      }
-    })
-
-    // Sort by consistency ascending
-    analyzed.sort((a,b) => a.consistencyPct - b.consistencyPct)
-
-    const weakPool = analyzed.filter(h => h.isWeak)
-    const strongPool = analyzed.filter(h => !h.isWeak)
-
-    const selectedWeak = weakPool.slice(0, WEAK_MAX)
-    const selectedStrong = strongPool.slice(0, Math.min(STRONG_MAX, MAX_REC - selectedWeak.length))
-
-    // If we don't have enough weak, fill with strong, and vice versa
-    if (selectedWeak.length < WEAK_MAX) {
-       const extraStrong = strongPool.slice(selectedStrong.length, selectedStrong.length + (WEAK_MAX - selectedWeak.length))
-       selectedStrong.push(...extraStrong)
-    }
-
-    // Final order: Weakest first to force reinforcement
-    const finalRecs = [...selectedWeak, ...selectedStrong]
-
-    return { 
-      todaysHabits: todayList, 
-      recommendedHabits: finalRecs 
-    }
   }, [habits, dayOfWeekIndex])
 
   const getHabitProgress = (h) => {
@@ -179,258 +241,467 @@ export default function Today() {
   const toggleHabit = async (habit) => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        alert("Necesitas iniciar sesión")
-        return
-      }
+      if (!user) { alert("Necesitas iniciar sesión"); return }
 
       const { current, target, progress } = getHabitProgress(habit)
       const isCompleted = progress >= 1
+      const willComplete = !isCompleted
 
-      if (!habit.is_counter) {
-        if (isCompleted) {
-          // Uncheck
-          const { error } = await supabase.from('habit_logs').delete()
-            .eq('habit_id', habit.id)
-            .eq('completed_at', todayStr)
-          
-          if (error) throw error
-          setHabitLogs(prev => prev.filter(l => l.habit_id !== habit.id))
-        } else {
-          // Check
-          const { data, error } = await supabase.from('habit_logs')
-            .upsert([{ 
-              habit_id: habit.id, 
-              count: 1, 
-              completed_at: todayStr 
-            }], { onConflict: 'habit_id, completed_at' })
-            .select()
-          
-          if (error) throw error
-          if (data) setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
-        }
-      } else {
-        // Counter habit increment
-        const nextCount = isCompleted ? 0 : current + 1
-        if (nextCount === 0) {
-          const { error } = await supabase.from('habit_logs').delete()
-            .eq('habit_id', habit.id)
-            .eq('completed_at', todayStr)
-          
-          if (error) throw error
-          setHabitLogs(prev => prev.filter(l => l.habit_id !== habit.id))
-        } else {
-          const { data, error } = await supabase.from('habit_logs')
-            .upsert([{ 
-              habit_id: habit.id, 
-              count: nextCount, 
-              completed_at: todayStr 
-            }], { onConflict: 'habit_id, completed_at' })
-            .select()
-          
-          if (error) throw error
-          if (data) setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
+      // Check pop animation
+      if (willComplete) {
+        setPoppingCheckId(habit.id)
+        setTimeout(() => setPoppingCheckId(null), 200)
+      }
+
+      // --- DESHACER ---
+      if (isCompleted && !habit.is_counter) {
+        await supabase.from('habit_logs').delete().eq('habit_id', habit.id).eq('completed_at', todayStr)
+        // Refetch completo para recalcular racha desde BD
+        await fetchData()
+        return
+      }
+
+      if (habit.is_counter && isCompleted) {
+        // Undo counter habit
+        await supabase.from('habit_logs').delete().eq('habit_id', habit.id).eq('completed_at', todayStr)
+        setHabitLogs(prev => prev.filter(l => l.habit_id !== habit.id))
+        setChallengeLogs(prev => prev.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr))
+        return
+      }
+
+      // --- COMPLETAR ---
+      // Detectar estado fallo para reiniciar reto
+      let didRestartChallenge = false
+      if (habit.challenge_active) {
+        const status = getChallengeStatus(habit, challengeLogs, todayStr)
+        if (status.isInFailureState) {
+          // Reiniciar reto: challenge_started_at = now()
+          await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id)
+          didRestartChallenge = true
         }
       }
-    } catch (err) { 
-      console.error('Error toggling habit:', err) 
-      alert("Error al actualizar hábito: " + (err.message || "revisa tu conexión"))
-    }
+
+      const checkChallenge = () => {
+        if (habit.challenge_active && !didRestartChallenge) {
+          const status = getChallengeStatus(habit, challengeLogs, todayStr)
+          const newStreak = status.streak + 1
+          if (newStreak >= habit.challenge_days) {
+            handleChallengeCompletion(habit)
+            return true
+          }
+        }
+        return false
+      }
+
+      if (!habit.is_counter) {
+        const { data } = await supabase.from('habit_logs')
+          .upsert([{ habit_id: habit.id, count: 1, completed_at: todayStr }], { onConflict: 'habit_id, completed_at' }).select()
+        if (data) {
+          setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
+          setChallengeLogs(prev => [...prev.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), data[0]])
+        }
+      } else {
+        const nextCount = current + 1
+        const willCompleteCounter = nextCount >= target
+        const { data } = await supabase.from('habit_logs')
+          .upsert([{ habit_id: habit.id, count: nextCount, completed_at: todayStr }], { onConflict: 'habit_id, completed_at' }).select()
+        if (data) {
+          setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
+          setChallengeLogs(prev => [...prev.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), data[0]])
+        }
+        if (willCompleteCounter) {
+          const completedChallenge = checkChallenge()
+          setCelebratingIds(prev => new Set([...prev, habit.id]))
+          setTimeout(() => setCelebratingIds(prev => { const n = new Set(prev); n.delete(habit.id); return n }), 700)
+          setFadingHabits(prev => new Set([...prev, habit.id]))
+          setTimeout(() => {
+            setFadingHabits(prev => { const n = new Set(prev); n.delete(habit.id); return n })
+            setHiddenHabits(prev => new Set([...prev, habit.id]))
+          }, completedChallenge ? 1200 : 250)
+          return
+        }
+      }
+
+      if (willComplete) {
+        const completedChallenge = checkChallenge()
+        setCelebratingIds(prev => new Set([...prev, habit.id]))
+        setTimeout(() => setCelebratingIds(prev => { const n = new Set(prev); n.delete(habit.id); return n }), 700)
+        setFadingHabits(prev => new Set([...prev, habit.id]))
+        setTimeout(() => {
+          setFadingHabits(prev => { const n = new Set(prev); n.delete(habit.id); return n })
+          setHiddenHabits(prev => new Set([...prev, habit.id]))
+        }, completedChallenge ? 1200 : 250)
+      }
+    } catch (err) { console.error('Error toggling habit:', err) }
   }
 
-  // --- POMODORO LOGIC ---
-  const pomodoroTotalMins = pomodoros.reduce((acc, p) => acc + p.duration_minutes, 0)
-  const pomodoroHours = Math.floor(pomodoroTotalMins / 60)
-  const pomodoroMins = pomodoroTotalMins % 60
+  // --- GAMIFIED METRICS ---
+  const { coreTotal, coreCompleted, corePctReal, extrasTotal, extrasCompleted, extrasPctReal } = useMemo(() => {
+    let ct = 0, cc = 0, ccPartial = 0, et = 0, ec = 0, ecPartial = 0
+    todaysHabits.forEach(h => {
+      const { progress } = getHabitProgress(h)
+      const isCompleted = progress >= 1
+      if (h.is_core) {
+        ct++; ccPartial += progress; if (isCompleted) cc++
+      } else {
+        et++; ecPartial += progress; if (isCompleted) ec++
+      }
+    })
+    return {
+      coreTotal: ct, coreCompleted: cc, corePctReal: ct === 0 ? 0 : Math.round((ccPartial / ct) * 100),
+      extrasTotal: et, extrasCompleted: ec, extrasPctReal: et === 0 ? 0 : Math.round((ecPartial / et) * 100),
+    }
+  }, [todaysHabits, habitLogs])
+
+  const coreComplete = corePctReal >= 100 && coreTotal > 0
+  const barCorePct = Math.min(corePctReal, 100)
+  const barExtrasPct = (coreComplete && extrasCompleted > 0) ? Math.min(extrasPctReal, 100) : 0
+  const displayPct = coreComplete ? 100 + barExtrasPct : barCorePct
+  const isLegendary = displayPct >= 200
+
+  const totalProductivity = coreCompleted + extrasCompleted + completedTodosCount
+
+  // Celebrations
+  useEffect(() => {
+    if (coreComplete && !prevCoreCompleteRef.current && coreTotal > 0) {
+      setAllCoreCelebration(true)
+      setTimeout(() => setAllCoreCelebration(false), 1500)
+    }
+    prevCoreCompleteRef.current = coreComplete
+  }, [coreComplete, coreTotal])
+
+  useEffect(() => {
+    if (isLegendary && !prevLegendaryRef.current) {
+      setLegendaryCelebration(true)
+      setTimeout(() => setLegendaryCelebration(false), 2000)
+    }
+    prevLegendaryRef.current = isLegendary
+  }, [isLegendary])
+
+  // Habits grouped for display — MEJORA 2: filter out completed habits permanently unless undone
+  const habitsByType = useMemo(() => {
+    const visible = todaysHabits.filter(h => {
+      // If locally hidden (fade finished), don't show
+      if (hiddenHabits.has(h.id)) return false
+      // Let it remain visible if fading/celebrating (so animation finishes before disappearing)
+      if (fadingHabits.has(h.id) || celebratingIds.has(h.id)) return true
+      
+      // Permanently hide if it is already logged as completed today
+      const log = habitLogs.find(l => l.habit_id === h.id)
+      const isCompleted = log && (!h.is_counter || log.count >= (h.target_count || 1))
+      if (isCompleted) return false
+
+      return true
+    })
+    const core = visible.filter(h => h.is_core)
+    const extra = visible.filter(h => !h.is_core)
+    return { core, extra }
+  }, [todaysHabits, habitLogs, hiddenHabits, fadingHabits, celebratingIds])
+
+  // Helper for focus card date text
+  const getDaysLeftText = (dateStr) => {
+    const today = new Date(); today.setHours(0,0,0,0)
+    const due = new Date(dateStr + "T00:00:00")
+    const diff = Math.ceil((due - today) / (1000 * 60 * 60 * 24))
+    if (diff < 0) return `Venció hace ${Math.abs(diff)} días`
+    if (diff === 0) return 'Vence hoy'
+    return `Vence en ${diff} días`
+  }
+
+  const focusTypeLabel = {
+    critica: '🔥 Crítica',
+    energia: energySelector === 'high' ? '🔥 Alta energía' : energySelector === 'medium' ? '⚡ Media energía' : '🌿 Baja energía',
+    pendiente: '📋 Siguiente tarea',
+    none: ''
+  }
 
   return (
-    <div className="animate-fade-in-up pb-12">
-      {/* SaaS Typography: Page Title (32px), padding 24px */}
-      <div className="mb-8">
-        <h1 className="text-[32px] font-black tracking-tight text-slate-100">
-          Mi Día
-        </h1>
-        <p className="text-[14px] text-slate-400 font-medium tracking-wide">
-          {new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+    <div className="animate-fade-in-up">
+      {/* Header */}
+      <div className="screen-header">
+        <h1 className="screen-title">Mi Día</h1>
+        <p className="screen-sub">
+          {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
         </p>
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-20">
-          <svg className="animate-spin w-8 h-8 text-rose-500" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" /><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" /></svg>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
+          <svg className="animate-spin" style={{ width: 24, height: 24, color: 'var(--text3)' }} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" style={{ opacity: 0.25 }} />
+            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style={{ opacity: 0.75 }} />
+          </svg>
         </div>
       ) : (
-        <div className="flex flex-col gap-8">
-          
-          {/* SEC 1: URGENT TASKS */}
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-[20px]">🔥</span>
-              <h2 className="text-[20px] font-bold text-slate-100">Hacer Ahora</h2>
-              <span className="ml-2 bg-rose-500/20 text-rose-500 py-0.5 px-2 rounded-full text-[12px] font-bold">{hacerAhora.length}</span>
+        <>
+          {/* Energy Selector */}
+          <div className="energy-row">
+            {[
+              { key: 'low', icon: '🌿', label: 'Baja' },
+              { key: 'medium', icon: '⚡', label: 'Media' },
+              { key: 'high', icon: '🔥', label: 'Alta' }
+            ].map(e => (
+              <div
+                key={e.key}
+                className={`energy-btn ${energySelector === e.key ? 'active' : ''}`}
+                onClick={() => setEnergySelector(energySelector === e.key ? null : e.key)}
+              >
+                <span className="energy-icon">{e.icon}</span>
+                <span className="energy-txt">{e.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Overdrive + Productivity — 2 col grid */}
+          <div className="two-col">
+            {/* Overdrive Card */}
+            <div
+              className={`card ${legendaryCelebration ? 'animate-legendary-complete' : allCoreCelebration ? 'animate-all-core-complete' : ''}`}
+              style={isLegendary ? { borderColor: 'rgba(59,126,248,0.2)' } : {}}
+            >
+              <div className="od-pct" style={isLegendary ? {
+                background: 'linear-gradient(135deg, var(--red), #8b5cf6, var(--blue))',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+              } : {}}>
+                {displayPct}%
+              </div>
+              <div className="od-sub">{coreCompleted}/{coreTotal} Núcleo · {extrasCompleted}/{extrasTotal} Extra</div>
+              <div className="od-bar-track">
+                <div className="od-bar-fill" style={{ width: `${barCorePct}%`, background: 'var(--red)' }} />
+                {coreComplete && barExtrasPct > 0 && (
+                  <div className="od-bar-fill" style={{
+                    width: `${barExtrasPct}%`,
+                    background: 'linear-gradient(90deg, transparent 0%, var(--blue) 100%)',
+                    borderRadius: '0 3px 3px 0'
+                  }} />
+                )}
+              </div>
+              <div className="od-tags">
+                <span className="habit-badge badge-nucleo">Núcleo</span>
+                <span className="habit-badge badge-extra">Extra</span>
+                {isLegendary && <span className="habit-badge" style={{ background: 'var(--gold-soft)', color: 'var(--gold)' }}>⭐</span>}
+              </div>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {hacerAhora.length === 0 ? (
-                <div className="min-h-[120px] rounded-[16px] bg-slate-800/30 border border-slate-700/50 border-dashed flex items-center justify-center text-[14px] text-slate-500">
-                  Nada urgente. ¡Buen trabajo!
-                </div>
-              ) : (
-                hacerAhora.map(todo => (
-                  <div key={todo.id} className="group relative min-h-[120px] p-[20px] rounded-[16px] bg-slate-800/50 border border-rose-500/30 transition-all hover:bg-slate-700/50 hover:shadow-lg hover:shadow-rose-500/10 flex flex-col justify-between">
-                    <div>
-                       <h3 className="text-[15px] font-semibold text-slate-100 break-words line-clamp-2">{todo.title}</h3>
-                       {todo.due_date && <p className="text-[12px] text-rose-400 mt-1 font-bold">⚠️ Vence: {todo.due_date.split('-').reverse().slice(0,2).join('/')}</p>}
-                    </div>
-                    <div className="flex items-center justify-between mt-4">
-                      <button onClick={() => completeTodo(todo.id)} className="w-9 h-9 sm:w-8 sm:h-8 rounded-full border-2 border-slate-500 hover:border-emerald-500 hover:bg-emerald-500/20 transition-colors flex items-center justify-center group/btn shadow-inner cursor-pointer">
-                        <svg className="w-5 h-5 sm:w-4 sm:h-4 text-emerald-500 opacity-0 group-hover/btn:opacity-100" fill="currentColor" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      </button>
-                      <button onClick={() => navigate('/pomodoro')} className="text-[11px] font-bold text-white bg-rose-500 px-3 py-1.5 rounded-lg hover:bg-rose-600 transition-colors shadow-[0_4px_10px_rgba(244,63,94,0.3)]">
-                        Enfocar
-                      </button>
+
+            {/* Productivity Card */}
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div key={totalProductivity} className={`prod-num anim-flip-in`} style={{ overflow:'hidden' }}>{totalProductivity}</div>
+              <div className="prod-phrase">"{getDailyMessage(totalProductivity)}"</div>
+            </div>
+          </div>
+
+          {/* Focus Card — ALWAYS VISIBLE */}
+          <div style={{ marginBottom: 24 }}>
+            <div className="section-label">Tu foco ahora</div>
+            {currentFocusTask ? (
+              <div className="task-focus" style={{ position: 'relative' }}>
+                <div className="focus-label">{focusTypeLabel[focusPool.type]}</div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  {/* Checkbox to complete */}
+                  <div
+                    className="task-sq"
+                    onClick={() => completeTodo(currentFocusTask.id)}
+                    style={{ marginTop: 3, flexShrink: 0 }}
+                  >
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="focus-title">{currentFocusTask.title}</div>
+                    {/* BUG 3 FIX: removed priority label, only show date info */}
+                    <div className="focus-meta">
+                      {currentFocusTask.due_date && getDaysLeftText(currentFocusTask.due_date)}
                     </div>
                   </div>
-                ))
-              )}
-            </div>
-          </section>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
+                  <button className="focus-btn" onClick={() => navigate('/pomodoro')}>
+                    Enfocar con Pomodoro
+                  </button>
+                  {/* Cycle button */}
+                  {focusPool.tasks.length > 1 && (
+                    <button
+                      onClick={cycleFocus}
+                      style={{
+                        width: 36, height: 36, borderRadius: 10,
+                        background: 'var(--surface2)', border: '1px solid var(--border)',
+                        color: 'var(--text2)', cursor: 'pointer', fontSize: 16,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 0.2s', flexShrink: 0
+                      }}
+                      title="Siguiente tarea"
+                    >⟳</button>
+                  )}
+                </div>
+                {/* Pool indicator */}
+                {focusPool.tasks.length > 1 && (
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8 }}>
+                    {(focusIndex % focusPool.tasks.length) + 1} de {focusPool.tasks.length}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="task-focus" style={{ textAlign: 'center', padding: '24px 16px' }}>
+                <div style={{ fontSize: 14, color: 'var(--text3)' }}>🎯 Sin tareas pendientes</div>
+                <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>¡Buen trabajo!</div>
+              </div>
+            )}
+          </div>
 
-          {/* SEC 2: TODAY'S HABITS (Moved Up) */}
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-[20px]">🎯</span>
-              <h2 className="text-[20px] font-bold text-slate-100">Hábitos de Hoy</h2>
-              <span className="ml-2 bg-emerald-500/20 text-emerald-500 py-0.5 px-2 rounded-full text-[12px] font-bold">{todaysHabits.length}</span>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {todaysHabits.length === 0 ? (
-                 <div className="min-h-[120px] rounded-[16px] bg-slate-800/30 border border-slate-700/50 border-dashed flex items-center justify-center text-[14px] text-slate-500">
-                    No hay hábitos programados para hoy.
-                 </div>
-              ) : (
-                todaysHabits.map((h, i) => {
-                  const { current, target, progress } = getHabitProgress(h)
-                  const isCompleted = progress >= 1
-                  return (
-                    <div key={h.id} className="min-h-[120px] p-[20px] rounded-[16px] bg-slate-800/40 border border-slate-700 flex flex-col justify-between transition-all hover:bg-slate-700/50">
-                      <div className="flex items-start justify-between">
-                         <div className="flex items-center gap-3">
-                            <span className="text-2xl">{h.icon || '✨'}</span>
-                            <span className={`text-[15px] font-bold transition-all ${isCompleted ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{h.name}</span>
-                         </div>
-                         {h.is_counter && (
-                           <span className="text-[12px] font-bold text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
-                             {current} / {target}
-                           </span>
-                         )}
-                      </div>
-                      
-                      <div className="mt-4">
-                        {!h.is_counter ? (
-                          <button
-                            onClick={() => toggleHabit(h)}
-                            className="flex items-center gap-3 group cursor-pointer"
-                          >
-                            <div className={`w-9 h-9 sm:w-8 sm:h-8 rounded-xl border-2 flex items-center justify-center transition-colors ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-600 group-hover:border-emerald-500'}`}>
-                               {isCompleted && <svg className="w-5 h-5 sm:w-4 sm:h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
-                            </div>
-                            <span className="text-[13px] font-semibold text-slate-400 group-hover:text-slate-300">{isCompleted ? 'Completado' : 'Marcar complete'}</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => toggleHabit(h)}
-                            disabled={isCompleted}
-                            className={`w-full py-2 rounded-xl text-[13px] font-bold transition-colors cursor-pointer ${isCompleted ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 line-through opacity-70' : 'bg-rose-500 text-white hover:bg-rose-600 shadow-[0_4px_15px_-3px_rgba(244,63,94,0.4)]'}`}
-                          >
-                            {isCompleted ? '¡Meta alcanzada!' : '+1 Añadir Métrica'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </section>
+          {/* Habits of the day — MEJORA 2: completed habits hidden with fade-out */}
+          <div className="habit-list">
+            <div className="section-label">Hábitos de hoy</div>
 
-          {/* SEC 3: RECOMMENDED (Habits Algorithmic) */}
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-[20px]">💡</span>
-              <h2 className="text-[20px] font-bold text-slate-100">Hábitos a Reforzar</h2>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                 {recommendedHabits.length === 0 ? (
-                    <div className="col-span-full min-h-[120px] rounded-[16px] bg-slate-800/30 border border-slate-700/50 border-dashed flex items-center justify-center text-[14px] text-slate-500">
-                      Sin recomendaciones activas.
+            {todaysHabits.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text3)', fontSize: 14 }}>
+                No hay hábitos programados para hoy.
+              </div>
+            ) : (
+              <>
+                {/* Core habits */}
+                {habitsByType.core.length > 0 && (
+                  <>
+                    <div className="habit-group-label">
+                      <div className="habit-group-dot" style={{ background: 'var(--red)' }} />
+                      Núcleo
                     </div>
-                 ) : (
-                    recommendedHabits.map((h) => {
+                    {habitsByType.core.map(h => {
                       const { current, target, progress } = getHabitProgress(h)
                       const isCompleted = progress >= 1
+                      const isFading = fadingHabits.has(h.id)
+                      const isCelebrating = celebratingIds.has(h.id)
+                      const isChallengeDone = completingChallengeIds.has(h.id)
+                      const status = getChallengeStatus(h, challengeLogs, todayStr)
+                      const streak = status.streak
+                      
                       return (
-                        <div key={h.id} className="group p-[20px] rounded-[16px] border transition-all duration-300 hover:shadow-lg flex flex-col justify-between"
-                             style={{
-                               background: isCompleted ? 'rgba(16, 185, 129, 0.05)' : 'var(--bg-card)',
-                               borderColor: isCompleted ? 'rgba(16, 185, 129, 0.3)' : 'var(--border-subtle)'
-                             }}
+                        <div
+                          key={h.id}
+                          className={`habit-row ${isFading ? 'animate-habit-hide' : ''} ${isCelebrating ? 'animate-habit-complete' : ''}`}
                         >
-                          <div className="flex items-start justify-between mb-3">
-                            <h4 className={`text-[15px] font-bold transition-colors ${isCompleted ? 'text-emerald-500 line-through' : 'text-slate-200'}`}>{h.name}</h4>
-                            <div className="flex gap-2">
-                               {h.isWeak && !isCompleted && <span className="text-[10px] uppercase font-black tracking-widest bg-rose-500/20 text-rose-500 px-1.5 py-0.5 rounded-md">Débil</span>}
-                               <span className="text-[11px] font-bold text-slate-400 bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800">🔥 {h.currentStreak} días</span>
-                            </div>
+                          <div
+                            className={`habit-check ${isCompleted ? (isChallengeDone ? 'done-gold' : 'done') : ''} ${poppingCheckId === h.id ? 'anim-habit-check-pop' : ''}`}
+                            onClick={() => toggleHabit(h)}
+                            style={isChallengeDone ? { backgroundColor: '#c9963a', borderColor: '#c9963a' } : {}}
+                          >
+                            {isCompleted && <span style={{ fontSize: 10, color: 'white' }}>✓</span>}
                           </div>
                           
-                          <div className="mb-4">
-                             <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">
-                               <span>Consistencia 30d</span>
-                               <span>{h.consistencyPct}%</span>
-                             </div>
-                             <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
-                                <div className={`h-full rounded-full ${h.isWeak ? 'bg-orange-500' : 'bg-emerald-500'}`} style={{ width: `${h.consistencyPct}%` }} />
-                             </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 2 }}>
+                            <span className={`habit-name ${isCompleted ? 'completed' : ''}`} style={{ flex: 'none' }}>
+                              {h.name}
+                              {status.showRedX && (
+                                <span style={{ color: '#dc2020', marginLeft: 6, fontWeight: 'bold', fontSize: 15 }} title="Racha rota — completa hoy para reiniciar">✕</span>
+                              )}
+                              {h.is_counter && (
+                                <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 6 }}>
+                                  {current}/{target}
+                                </span>
+                              )}
+                            </span>
+                            
+                            {/* Barra dorada + medalla: solo ESTADO NORMAL (sin X, sin completado) */}
+                            {(h.challenge_active && status.isActive && !status.showRedX && !isChallengeDone) && (
+                              <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <span style={{ fontSize: 12 }}>🏅</span>
+                                  <div style={{ flex: 1, height: 3, background: 'var(--border)', borderRadius: 2 }}>
+                                    <div style={{ width: `${Math.min((streak / h.challenge_days) * 100, 100)}%`, height: '100%', background: '#c9963a', borderRadius: 2, transition: 'width 0.3s' }} />
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 11, color: '#a1a1aa' }}>Racha: {Math.min(streak, h.challenge_days)} / {h.challenge_days} días</div>
+                              </div>
+                            )}
+                            {isChallengeDone && (
+                              <div style={{ marginTop: 2, fontSize: 11, color: '#c9963a', fontWeight: 'bold' }}>
+                                ✨ ¡Reto completado! 
+                              </div>
+                            )}
                           </div>
-
-                          <button
-                            onClick={() => toggleHabit(h)}
-                            disabled={isCompleted}
-                            className={`w-full py-2.5 rounded-xl text-[12px] font-bold transition-all cursor-pointer ${isCompleted ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 line-through opacity-70' : 'bg-slate-800 text-white hover:bg-slate-700 border border-slate-700'}`}
-                          >
-                            {isCompleted ? '¡Reforzado!' : 'Marcar para reforzar'}
-                          </button>
+                          
+                          <span className="habit-badge badge-nucleo">Núcleo</span>
                         </div>
                       )
-                    })
-                 )}
-            </div>
-          </section>
+                    })}
+                  </>
+                )}
 
-          {/* SEC 4: POMODORO STATS */}
-          <section>
-            <div className="flex items-center gap-2 mb-4">
-              <span className="text-[20px]">⏱️</span>
-              <h2 className="text-[20px] font-bold text-slate-100">Sesiones Enfocadas</h2>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-               <div className="min-h-[120px] p-[20px] rounded-[16px] bg-indigo-500/10 border border-indigo-500/20 flex flex-col justify-center items-center text-center transition-all hover:bg-indigo-500/20">
-                 <span className="text-3xl font-black text-indigo-400 mb-2">{pomodoros.length}</span>
-                 <span className="text-[13px] font-bold text-indigo-300/80 uppercase tracking-widest">Tomates Hoy</span>
-               </div>
-               
-               <div className="min-h-[120px] p-[20px] rounded-[16px] bg-amber-500/10 border border-amber-500/20 flex flex-col justify-center items-center text-center transition-all hover:bg-amber-500/20">
-                 <span className="text-3xl font-black text-amber-400 mb-2">{pomodoroHours}h {pomodoroMins}m</span>
-                 <span className="text-[13px] font-bold text-amber-300/80 uppercase tracking-widest">Tiempo Total</span>
-               </div>
-            </div>
-          </section>
+                {/* Extra habits */}
+                {habitsByType.extra.length > 0 && (
+                  <>
+                    <div className="habit-group-label" style={{ marginTop: 14 }}>
+                      <div className="habit-group-dot" style={{ background: 'var(--blue)' }} />
+                      Extra
+                    </div>
+                    {habitsByType.extra.map(h => {
+                      const { current, target, progress } = getHabitProgress(h)
+                      const isCompleted = progress >= 1
+                      const isFading = fadingHabits.has(h.id)
+                      const isCelebrating = celebratingIds.has(h.id)
+                      const isChallengeDone = completingChallengeIds.has(h.id)
+                      const status = getChallengeStatus(h, challengeLogs, todayStr)
+                      const streak = status.streak
+                      
+                      return (
+                        <div
+                          key={h.id}
+                          className={`habit-row ${isFading ? 'animate-habit-hide' : ''} ${isCelebrating ? 'animate-habit-complete' : ''}`}
+                        >
+                          <div
+                            className={`habit-check ${isCompleted ? (isChallengeDone ? 'done-gold' : 'done-blue') : ''} ${poppingCheckId === h.id ? 'anim-habit-check-pop' : ''}`}
+                            onClick={() => toggleHabit(h)}
+                            style={isChallengeDone ? { backgroundColor: '#c9963a', borderColor: '#c9963a' } : {}}
+                          >
+                            {isCompleted && <span style={{ fontSize: 10, color: 'white' }}>✓</span>}
+                          </div>
+                          
+                          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 2 }}>
+                            <span className={`habit-name ${isCompleted ? 'completed' : ''}`} style={{ flex: 'none' }}>
+                              {h.name}
+                              {status.showRedX && (
+                                <span style={{ color: '#dc2020', marginLeft: 6, fontWeight: 'bold', fontSize: 15 }} title="Racha rota — completa hoy para reiniciar">✕</span>
+                              )}
+                              {h.is_counter && (
+                                <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 6 }}>
+                                  {current}/{target}
+                                </span>
+                              )}
+                            </span>
+                            
+                            {/* Barra dorada + medalla: solo ESTADO NORMAL (sin X, sin completado) */}
+                            {(h.challenge_active && status.isActive && !status.showRedX && !isChallengeDone) && (
+                              <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <span style={{ fontSize: 12 }}>🏅</span>
+                                  <div style={{ flex: 1, height: 3, background: 'var(--border)', borderRadius: 2 }}>
+                                    <div style={{ width: `${Math.min((streak / h.challenge_days) * 100, 100)}%`, height: '100%', background: '#c9963a', borderRadius: 2, transition: 'width 0.3s' }} />
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 11, color: '#a1a1aa' }}>Racha: {Math.min(streak, h.challenge_days)} / {h.challenge_days} días</div>
+                              </div>
+                            )}
+                            {isChallengeDone && (
+                              <div style={{ marginTop: 2, fontSize: 11, color: '#c9963a', fontWeight: 'bold' }}>
+                                ✨ ¡Reto completado! 
+                              </div>
+                            )}
+                          </div>
+                          
+                          <span className="habit-badge badge-extra">Extra</span>
+                        </div>
+                      )
+                    })}
+                  </>
+                )}
 
-        </div>
+                {/* Show count of hidden completed habits */}
+                {hiddenHabits.size > 0 && (
+                  <div style={{ textAlign: 'center', padding: '12px 0', color: 'var(--text3)', fontSize: 12, opacity: 0.7 }}>
+                    ✓ {hiddenHabits.size} hábito{hiddenHabits.size > 1 ? 's' : ''} completado{hiddenHabits.size > 1 ? 's' : ''}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

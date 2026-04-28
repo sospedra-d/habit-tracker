@@ -8,6 +8,7 @@ import Pomodoro from './pages/Pomodoro'
 import DashboardPage from './pages/Dashboard'
 import Todos from './pages/Todos'
 import Today from './pages/Today'
+import Goals from './pages/Goals'
 
 function ProtectedRoute({ session, children }) {
   const location = useLocation()
@@ -58,6 +59,7 @@ function App() {
         <Route path="hoy" element={<Today />} />
         <Route path="habits" element={<Habits />} />
         <Route path="pomodoro" element={<Pomodoro />} />
+        <Route path="metas" element={<Goals />} />
         <Route path="estadisticas" element={<DashboardPage />} />
         <Route path="tareas" element={<Todos />} />
       </Route>

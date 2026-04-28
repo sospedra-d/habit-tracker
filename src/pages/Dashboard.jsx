@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import {
   BarChart,
@@ -10,7 +10,6 @@ import {
   Cell
 } from 'recharts'
 
-// Generate dates once outside the component to prevent infinite dependency loops
 const generateDays = (count) => {
   const days = []
   const today = new Date()
@@ -25,13 +24,75 @@ const generateDays = (count) => {
 const STATIC_LAST_7_DAYS = generateDays(7)
 const STATIC_LAST_90_DAYS = generateDays(90)
 
-export default function Dashboard() {
+// ─── Focused Time Tracker (localStorage-based, local only) ───
+const APP_TIME_KEY = 'habit_tracker_app_time'
+
+function getAppTimeData() {
+  try {
+    const raw = localStorage.getItem(APP_TIME_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw)
+  } catch { return {} }
+}
+
+function addAppTime(seconds) {
+  const todayStr = new Date().toISOString().split('T')[0]
+  const data = getAppTimeData()
+  data[todayStr] = (data[todayStr] || 0) + seconds
+  const keys = Object.keys(data).sort().slice(-7)
+  const cleaned = {}
+  keys.forEach(k => { cleaned[k] = data[k] })
+  localStorage.setItem(APP_TIME_KEY, JSON.stringify(cleaned))
+}
+
+function getTodayAppTime() {
+  const todayStr = new Date().toISOString().split('T')[0]
+  return getAppTimeData()[todayStr] || 0
+}
+
+export default function Dashboard({ embedded = false }) {
   const [loading, setLoading] = useState(true)
   const [logs, setLogs] = useState([])
-  const [pomodoroLogs, setPomodoroLogs] = useState([])
+  const [habits, setHabits] = useState([])
+  const [completedTodos, setCompletedTodos] = useState([])
+  const [todayHabitCount, setTodayHabitCount] = useState(0)
+  const [todayTodoCount, setTodayTodoCount] = useState(0)
+  const [appTimeSeconds, setAppTimeSeconds] = useState(getTodayAppTime())
 
   const last7Days = STATIC_LAST_7_DAYS
   const last90Days = STATIC_LAST_90_DAYS
+
+  // ─── App Time Tracking ───
+  const sessionStartRef = useRef(Date.now())
+
+  useEffect(() => {
+    const flushTime = () => {
+      const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000)
+      if (elapsed > 0) {
+        addAppTime(elapsed)
+        sessionStartRef.current = Date.now()
+        setAppTimeSeconds(getTodayAppTime())
+      }
+    }
+
+    const handleVisibility = () => {
+      if (document.hidden) flushTime()
+      else sessionStartRef.current = Date.now()
+    }
+
+    const handleBeforeUnload = () => flushTime()
+    const interval = setInterval(() => { if (!document.hidden) flushTime() }, 30000)
+
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    return () => {
+      flushTime()
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -40,23 +101,40 @@ export default function Dashboard() {
       if (!user) return
 
       const oldestDateStr = last90Days[0]
+      const todayStr = new Date().toISOString().split('T')[0]
 
-      // Fetch Habit Logs
       const { data: hLogs, error: hErr } = await supabase
         .from('habit_logs')
         .select('habit_id, completed_at, count')
         .gte('completed_at', oldestDateStr)
       if (hErr) throw hErr
 
-      // Fetch Pomodoro Logs
-      const { data: pLogs, error: pErr } = await supabase
-        .from('pomodoro_logs')
-        .select('duration_minutes, completed_at')
-        .gte('completed_at', `${oldestDateStr}T00:00:00Z`)
-      if (pErr) throw pErr
+      const { data: habitsData, error: habErr } = await supabase
+        .from('habits')
+        .select('id, is_core, days_of_week')
+      if (habErr) throw habErr
+
+      const { data: cTodos, error: tErr } = await supabase
+        .from('todos')
+        .select('id, created_at, completed_at, is_completed')
+        .eq('is_completed', true)
+        .gte('created_at', `${oldestDateStr}T00:00:00Z`)
+      if (tErr) throw tErr
 
       setLogs(hLogs || [])
-      setPomodoroLogs(pLogs || [])
+      setHabits(habitsData || [])
+      setCompletedTodos(cTodos || [])
+
+      // MEJORA 3: Count today's completed habits and todos
+      const todayHabits = (hLogs || []).filter(l => l.completed_at === todayStr)
+      setTodayHabitCount(todayHabits.length)
+
+      const todayStart = `${todayStr}T00:00:00Z`
+      const todayTodos = (cTodos || []).filter(t => {
+        const ua = t.completed_at || t.created_at
+        return ua >= todayStart
+      })
+      setTodayTodoCount(todayTodos.length)
     } catch (err) {
       console.error('Error fetching analytics:', err)
     } finally {
@@ -64,194 +142,264 @@ export default function Dashboard() {
     }
   }, [last90Days])
 
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
+  useEffect(() => { fetchData() }, [fetchData])
 
-  // Data processing for Bar Chart (last 7 days)
+  // MEJORA 3: Enhanced weekly data with core/extra/legendary info for colored bars
   const weeklyData = useMemo(() => {
     const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+    const coreHabitIds = new Set(habits.filter(h => h.is_core).map(h => h.id))
+
     return last7Days.map((dateStr) => {
-      const d = new Date(dateStr + "T00:00:00") // Fix timezone shift
+      const d = new Date(dateStr + "T00:00:00")
       const dayLabel = dayNames[d.getDay()]
-      
       const dayLogs = logs.filter(l => l.completed_at === dateStr)
-      // For counters, we could count sum of 'count' or just 1 per log. We'll count 1 per log entry to represent "interactions/goals met"
       const completados = dayLogs.length
 
-      return {
-        name: dayLabel,
-        completados,
-        dateStr
-      }
-    })
-  }, [last7Days, logs])
+      const coreCount = dayLogs.filter(l => coreHabitIds.has(l.habit_id)).length
+      const extraCount = dayLogs.filter(l => !coreHabitIds.has(l.habit_id)).length
 
-  // Data processing for Heatmap (last 90 days mapped to counts)
+      const dayOfWeek = d.getDay()
+      const scheduledCoreCount = habits.filter(h => h.is_core && (h.days_of_week?.includes(dayOfWeek) ?? true)).length
+      const scheduledExtraCount = habits.filter(h => !h.is_core && (h.days_of_week?.includes(dayOfWeek) ?? true)).length
+      const allCoreComplete = scheduledCoreCount > 0 && coreCount >= scheduledCoreCount
+      const allExtrasComplete = scheduledExtraCount > 0 && extraCount >= scheduledExtraCount
+      const isLegendary = allCoreComplete && allExtrasComplete
+      const hasExtras = extraCount > 0
+
+      // Determine bar color
+      let barColor = '#262626' // no completions
+      if (completados > 0) {
+        if (isLegendary) barColor = '#c9963a' // gold for 200%
+        else if (hasExtras) barColor = '#3b7ef8' // blue for extras
+        else barColor = '#dc2020' // red for core only
+      }
+
+      return { name: dayLabel, completados, dateStr, barColor }
+    })
+  }, [last7Days, logs, habits])
+
+  // ─── Streak ───
+  const currentStreak = useMemo(() => {
+    let streak = 0
+    for (let i = 0; i < 90; i++) {
+      const d = new Date()
+      d.setDate(d.getDate() - i)
+      const dateStr = d.toISOString().split('T')[0]
+      const dayHabitCount = logs.filter(l => l.completed_at === dateStr).length
+      const dayTodoCount = completedTodos.filter(t => t.created_at?.split('T')[0] === dateStr).length
+      if (dayHabitCount + dayTodoCount >= 5) streak++
+      else { if (i === 0) continue; break }
+    }
+    return streak
+  }, [logs, completedTodos])
+
+  // ─── Heatmap ───
   const heatmapData = useMemo(() => {
-    const counts = {}
-    last90Days.forEach(d => counts[d] = 0)
-    
-    logs.forEach(log => {
-      if (counts[log.completed_at] !== undefined) {
-        counts[log.completed_at] += 1
-      }
-    })
-    
-    // Group into weeks for the grid wrapper (7 rows, N cols)
-    // Actually, simpler approach: just render as continuous flexwrap or grid
-    // For a true Github look: CSS grid with columns flowing top-to-bottom, left-to-right.
-    return Object.entries(counts).map(([date, count]) => ({ date, count }))
-  }, [last90Days, logs])
+    const coreHabitIds = new Set(habits.filter(h => h.is_core).map(h => h.id))
 
-  // Get intensity color class for Heatmap cells
-  const getIntensityColor = (count) => {
-    if (count === 0) return 'bg-white/5 border border-white/5'
-    if (count === 1) return 'bg-[#f43f5e]/30 border border-[#f43f5e]/20'
-    if (count === 2) return 'bg-[#f43f5e]/60 border border-[#f43f5e]/40'
-    if (count === 3) return 'bg-[#f43f5e]/80 border border-[#f43f5e]/60'
-    return 'bg-[#f43f5e] border border-[#f43f5e]' // 4+
+    return last90Days.map(dateStr => {
+      const dayLogs = logs.filter(l => l.completed_at === dateStr)
+      const count = dayLogs.length
+      const coreCompletedOnDay = dayLogs.filter(l => coreHabitIds.has(l.habit_id)).length
+      const extraCompletedOnDay = dayLogs.filter(l => !coreHabitIds.has(l.habit_id)).length
+      const dayOfWeek = new Date(dateStr + "T00:00:00").getDay()
+      const scheduledCoreCount = habits.filter(h => h.is_core && (h.days_of_week?.includes(dayOfWeek) ?? true)).length
+      const scheduledExtraCount = habits.filter(h => !h.is_core && (h.days_of_week?.includes(dayOfWeek) ?? true)).length
+      const allCoreComplete = scheduledCoreCount > 0 && coreCompletedOnDay >= scheduledCoreCount
+      const allExtrasComplete = scheduledExtraCount > 0 && extraCompletedOnDay >= scheduledExtraCount
+      const hasExtras = allCoreComplete && extraCompletedOnDay > 0
+      const isLegendary = allCoreComplete && allExtrasComplete
+
+      return { date: dateStr, count, hasExtras, isLegendary }
+    })
+  }, [last90Days, logs, habits])
+
+  const getHeatColor = (day) => {
+    if (day.count === 0) return { bg: 'rgba(40,40,42,0.5)', border: '1px solid rgba(60,60,64,0.5)' }
+    if (day.isLegendary) return { bg: 'rgba(23,23,23,0.85)', border: '1px solid rgba(180,140,60,0.4)', legendary: true }
+    if (day.hasExtras) {
+      const a = Math.min(day.count * 0.2, 1)
+      return { bg: `rgba(59,126,248,${a})`, border: `1px solid rgba(59,126,248,${a * 0.5})` }
+    }
+    const a = Math.min(day.count * 0.2, 1)
+    return { bg: `rgba(220,32,32,${a})`, border: `1px solid rgba(220,32,32,${a * 0.5})` }
   }
 
-  // Quick Stats computation
   const totalCompletedThisWeek = weeklyData.reduce((acc, curr) => acc + curr.completados, 0)
-  
-  const totalFocusMinutesThisWeek = useMemo(() => {
-    const weekStart = last7Days[0]
-    return pomodoroLogs
-      .filter(p => p.completed_at >= weekStart)
-      .reduce((acc, curr) => acc + curr.duration_minutes, 0)
-  }, [pomodoroLogs, last7Days])
 
-  const totalFocusHours = Math.floor(totalFocusMinutesThisWeek / 60)
-  const totalFocusMins = totalFocusMinutesThisWeek % 60
+  const appTimeHours = Math.floor(appTimeSeconds / 3600)
+  const appTimeMins = Math.floor((appTimeSeconds % 3600) / 60)
 
   return (
-    <div className="animate-fade-in-up max-w-5xl mx-auto">
+    <div className={embedded ? '' : 'animate-fade-in-up'}>
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
-          Panel de Estadísticas
-        </h1>
-        <p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
-          Visualiza tu progreso y descubre tus patrones de productividad.
-        </p>
-      </div>
+      {!embedded && (
+        <div className="screen-header">
+          <h1 className="screen-title">Estadísticas</h1>
+          <p className="screen-sub">Tu progreso y patrones de productividad</p>
+        </div>
+      )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-24">
-          <svg className="animate-spin w-8 h-8" style={{ color: 'var(--accent-primary)' }} viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
-            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
+          <svg className="animate-spin" style={{ width: 24, height: 24, color: 'var(--text3)' }} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" style={{ opacity: 0.25 }} />
+            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style={{ opacity: 0.75 }} />
           </svg>
         </div>
       ) : (
-        <div className="space-y-6">
-          
-          {/* Top Quick Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-6 rounded-2xl border" style={{ background: 'var(--glass-bg)', borderColor: 'var(--border-subtle)' }}>
-               <div className="flex items-center gap-3 mb-2">
-                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(244, 63, 94, 0.1)', color: 'var(--accent-primary)' }}>
-                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                   </svg>
-                 </div>
-                 <h3 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Hábitos Completados (Últimos 7 días)</h3>
-               </div>
-               <p className="text-3xl font-bold mt-2" style={{ color: 'var(--text-primary)' }}>{totalCompletedThisWeek}</p>
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-            <div className="p-6 rounded-2xl border" style={{ background: 'var(--glass-bg)', borderColor: 'var(--border-subtle)' }}>
-               <div className="flex items-center gap-3 mb-2">
-                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#10b981' }}>
-                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                   </svg>
-                 </div>
-                 <h3 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Tiempo Enfocado (Últimos 7 días)</h3>
-               </div>
-               <p className="text-3xl font-bold mt-2" style={{ color: 'var(--text-primary)' }}>
-                 {totalFocusHours > 0 && `${totalFocusHours}h `}
-                 {totalFocusMins}m
-               </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Weekly Bar Chart */}
-            <div className="lg:col-span-2 p-6 rounded-2xl border flex flex-col" style={{ background: 'var(--glass-bg)', borderColor: 'var(--border-subtle)' }}>
-              <h3 className="text-sm font-bold mb-6" style={{ color: 'var(--text-primary)' }}>Productividad Diaria</h3>
-              <div className="flex-1 min-h-[250px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={weeklyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                    <XAxis 
-                      dataKey="name" 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{ fill: '#94a3b8', fontSize: 12 }} 
-                      dy={10}
-                    />
-                    <YAxis 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{ fill: '#94a3b8', fontSize: 12 }} 
-                      allowDecimals={false}
-                    />
-                    <Tooltip 
-                      cursor={{ fill: 'rgba(255,255,255,0.05)' }} 
-                      contentStyle={{ background: '#1e1e2d', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }}
-                      itemStyle={{ color: '#fff', fontWeight: 'bold' }}
-                    />
-                    <Bar dataKey="completados" name="Completados" radius={[6, 6, 6, 6]}>
-                      {weeklyData.map((entry, index) => {
-                        const isToday = entry.dateStr === last7Days[last7Days.length - 1]
-                        return <Cell key={`cell-${index}`} fill={isToday ? '#f43f5e' : '#334155'} />
-                      })}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+          {/* 3 Metric Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            <div className="card">
+              <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--text1)', lineHeight: 1 }}>
+                {totalCompletedThisWeek}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6, letterSpacing: '0.03em' }}>
+                Hábitos (7 días)
               </div>
             </div>
 
-            {/* Heatmap (Activity Calendar) */}
-            <div className="p-6 rounded-2xl border flex flex-col" style={{ background: 'var(--glass-bg)', borderColor: 'var(--border-subtle)' }}>
-              <h3 className="text-sm font-bold mb-6" style={{ color: 'var(--text-primary)' }}>Mapa de Calor (90 días)</h3>
-              
-              <div className="flex-1 overflow-x-auto overflow-y-hidden pb-4 custom-scrollbar">
-                <div className="min-w-max flex items-center justify-center sm:justify-start">
-                  <div 
-                    className="grid gap-[3px] auto-rows-[12px] grid-flow-col mx-auto sm:mx-0 pr-4" // Force columns instead of rows
-                    style={{ 
-                      gridTemplateRows: 'repeat(7, minmax(0, 1fr))',
-                      height: 'max-content'
+            <div className="card">
+              <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--text1)', lineHeight: 1 }}>
+                {currentStreak}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6, letterSpacing: '0.03em' }}>
+                🔥 Racha actual{currentStreak !== 1 && ' (días)'}
+              </div>
+            </div>
+
+            <div className="card">
+              <div style={{ fontSize: 32, fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--text1)', lineHeight: 1 }}>
+                {appTimeHours > 0 ? `${appTimeHours}h` : ''}{appTimeMins}m
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6, letterSpacing: '0.03em' }}>
+                Tiempo en app
+              </div>
+            </div>
+          </div>
+
+          {/* MEJORA 3a: Removed pomodoro stats cards */}
+
+          {/* Productivity Chart — full width, colored bars */}
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text2)', marginBottom: 16 }}>
+              Productividad Diaria
+            </div>
+            <div style={{ width: '100%', minHeight: 200 }}>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={weeklyData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                  <XAxis
+                    dataKey="name"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: '#52525b', fontSize: 11 }}
+                    dy={8}
+                  />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: '#52525b', fontSize: 11 }}
+                    allowDecimals={false}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(255,255,255,0.03)' }}
+                    contentStyle={{
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 12,
+                      fontSize: 12
                     }}
-                  >
-                    {heatmapData.map((day, i) => (
-                      <div
-                        key={day.date}
-                        title={`${day.date}: ${day.count} hábitos`}
-                        className={`w-3 h-3 rounded-[2px] ${getIntensityColor(day.count)} transition-all duration-300 hover:scale-125 hover:z-10`}
-                      />
+                    itemStyle={{ color: 'var(--text1)', fontWeight: 500 }}
+                  />
+                  {/* MEJORA 3b: Colored bars — red=core, blue=extras, gold=200% */}
+                  <Bar dataKey="completados" name="Completados" radius={[4, 4, 4, 4]}>
+                    {weeklyData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.barColor} />
                     ))}
-                  </div>
-                </div>
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* MEJORA 3c: Today's metrics — 2 columns */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="card">
+              <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--text1)', lineHeight: 1 }}>
+                {todayHabitCount}
               </div>
-              
-              <div className="mt-6 flex items-center justify-between text-[10px]" style={{ color: 'var(--text-secondary)' }}>
-                <span>Menos Productivo</span>
-                <div className="flex gap-1">
-                  <div className="w-2.5 h-2.5 rounded-[2px] bg-white/5 border border-white/5" />
-                  <div className="w-2.5 h-2.5 rounded-[2px] bg-[#f43f5e]/30" />
-                  <div className="w-2.5 h-2.5 rounded-[2px] bg-[#f43f5e]/60" />
-                  <div className="w-2.5 h-2.5 rounded-[2px] bg-[#f43f5e]" />
-                </div>
-                <span>Más Productivo</span>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6 }}>
+                ✅ Hábitos completados hoy
+              </div>
+            </div>
+            <div className="card">
+              <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.04em', color: 'var(--text1)', lineHeight: 1 }}>
+                {todayTodoCount}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6 }}>
+                📋 Tareas completadas hoy
+              </div>
+            </div>
+          </div>
+
+          {/* Heatmap — full width */}
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text2)', marginBottom: 16 }}>
+              Mapa de Calor (90 días)
+            </div>
+
+            <div style={{ overflowX: 'auto', paddingBottom: 8 }} className="custom-scrollbar">
+              <div style={{
+                display: 'grid',
+                gridTemplateRows: 'repeat(7, 1fr)',
+                gridAutoFlow: 'column',
+                gap: 3,
+                width: 'max-content'
+              }}>
+                {heatmapData.map((day) => {
+                  const style = getHeatColor(day)
+                  return (
+                    <div
+                      key={day.date}
+                      title={`${day.date}: ${day.count} hábitos${day.isLegendary ? ' ⭐ Legendario' : day.hasExtras ? ' (+extras)' : ''}`}
+                      style={{
+                        width: 16, height: 16, borderRadius: 3,
+                        background: style.bg, border: style.border,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'opacity 0.2s', cursor: 'default'
+                      }}
+                    >
+                      {style.legendary && (
+                        <span style={{ fontSize: 7, lineHeight: 1, color: 'rgba(200,160,70,0.6)' }}>★</span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
+            {/* Legend — centered */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 6, marginTop: 14, fontSize: 10, color: 'var(--text3)'
+            }}>
+              <span>Menos</span>
+              <div style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(40,40,42,0.5)', border: '1px solid rgba(60,60,64,0.5)' }} />
+              <div style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(220,32,32,0.4)', border: '1px solid rgba(220,32,32,0.2)' }} />
+              <div style={{ width: 10, height: 10, borderRadius: 2, background: 'rgba(59,126,248,0.6)', border: '1px solid rgba(59,126,248,0.3)' }} />
+              <div style={{
+                width: 10, height: 10, borderRadius: 2,
+                background: 'rgba(23,23,23,0.85)', border: '1px solid rgba(180,140,60,0.4)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                <span style={{ fontSize: 5, color: 'rgba(200,160,70,0.6)' }}>★</span>
+              </div>
+              <span>Más</span>
+            </div>
           </div>
+
         </div>
       )}
     </div>

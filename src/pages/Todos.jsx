@@ -1,150 +1,99 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
+import TaskFormModal from '../components/TaskFormModal'
 
-// Constants for Energy levels styling
-const ENERGY_STYLES = {
-  low: {
-    label: 'Baja',
-    icon: '🔋',
-    color: '#10b981', // Emerald 500
-    bg: 'rgba(16, 185, 129, 0.15)',
-    border: 'rgba(16, 185, 129, 0.3)'
-  },
-  medium: {
-    label: 'Media',
-    icon: '⚡',
-    color: '#fbbf24', // Amber 400
-    bg: 'rgba(251, 191, 36, 0.15)',
-    border: 'rgba(251, 191, 36, 0.3)'
-  },
-  high: {
-    label: 'Alta',
-    icon: '🔥',
-    color: '#e11d48', // Rose 600
-    bg: 'rgba(225, 29, 72, 0.15)',
-    border: 'rgba(225, 29, 72, 0.3)'
-  }
+const ENERGY_MAP = {
+  high: { label: 'Alta', color: '#f97316', dotClass: 'p-alta' },
+  medium: { label: 'Media', color: 'var(--blue)', dotClass: 'p-media' },
+  low: { label: 'Baja', color: 'var(--text3)', dotClass: 'p-baja' }
 }
 
 export default function Todos() {
   const [todos, setTodos] = useState([])
+  const [completedTodos, setCompletedTodos] = useState([])
   const [loading, setLoading] = useState(true)
-
-  // Wizard State
-  const [showWizard, setShowWizard] = useState(false)
-  const [wizardEnergy, setWizardEnergy] = useState(null)
-
+  const [activeTab, setActiveTab] = useState('auto')
+  const [modalOpen, setModalOpen] = useState(false)
   const navigate = useNavigate()
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
+      // BUG 1 FIX: Fetch ALL todos (pending and completed) in one go
       const { data, error } = await supabase
         .from('todos')
         .select('*')
         .order('created_at', { ascending: false })
       if (error) throw error
-      setTodos(data || [])
-    } catch (err) {
-      console.error('Error fetching todos:', err)
-    } finally {
-      setLoading(false)
-    }
+      console.log('[Todos] Fetched all todos:', data?.length, data)
+
+      const pending = (data || []).filter(t => !t.is_completed)
+      
+      // BUG 2 FIX: filter completed by completed_at within last 24h
+      const since24h = Date.now() - 24 * 60 * 60 * 1000
+      const completed = (data || []).filter(t => {
+        if (!t.is_completed) return false
+        const completedAt = t.completed_at ? new Date(t.completed_at).getTime() : 0
+        return completedAt > since24h
+      })
+
+      setTodos(pending)
+      setCompletedTodos(completed)
+    } catch (err) { console.error('Error fetching todos:', err) }
+    finally { setLoading(false) }
   }, [])
 
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
+  useEffect(() => { fetchData() }, [fetchData])
 
-  // --- Automatic Classification Logic ---
   const categorizedTodos = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0]
     const today = new Date(todayStr + "T00:00:00")
-    
-    // Urgent margin: 3 days from today
     const urgentDate = new Date(today)
     urgentDate.setDate(today.getDate() + 3)
 
-    const hacerAhora = []
-    const agendado = []
-    const bandeja = []
+    const hacerAhora = [], agendado = [], bandeja = []
 
-    // Sort chronologically by due_date
-    const sortedTodos = [...todos].sort((a, b) => {
+    const sorted = [...todos].sort((a, b) => {
       if (!a.due_date && !b.due_date) return 0
-      if (!a.due_date) return 1
-      if (!b.due_date) return -1
+      if (!a.due_date) return 1; if (!b.due_date) return -1
       return new Date(a.due_date) - new Date(b.due_date)
     })
 
-    sortedTodos.forEach((todo) => {
-      // Prioritize assigning to correct buckets
-      // Energy Level defaults to medium if missing (for old data)
-      const t = { ...todo, energy_level: todo.energy_level || 'medium' }
-      
-      if (!t.due_date) {
-        bandeja.push(t)
-      } else {
+    sorted.forEach(todo => {
+      const t = { ...todo, energy_level: todo.energy_level || 'low' }
+      if (!t.due_date) bandeja.push(t)
+      else {
         const due = new Date(t.due_date + "T00:00:00")
-        if (due <= urgentDate) {
-          hacerAhora.push(t)
-        } else {
-          agendado.push(t)
-        }
+        if (due <= urgentDate) hacerAhora.push(t)
+        else agendado.push(t)
       }
     })
 
-    return { hacerAhora, agendado, bandeja, allActive: sortedTodos.filter(t => !t.is_completed) }
+    return { hacerAhora, agendado, bandeja }
   }, [todos])
 
-  // --- Wizard Recommendation Logic ---
-  const wizardRecommendations = useMemo(() => {
-    if (!wizardEnergy) return []
-    // Filter active items matching the energy
-    const activeMatch = categorizedTodos.allActive
-      .map(t => ({ ...t, energy_level: t.energy_level || 'medium' }))
-      .filter(t => t.energy_level === wizardEnergy)
-
-    // Sort by Urgency (Eisenhower rules)
-    // 1. Due within 3 days (Hacer Ahora items first)
-    // 2. Due > 3 days (Agendado items second)
-    // 3. No Date (Bandeja last)
-    const todayStr = new Date().toISOString().split('T')[0]
-    const today = new Date(todayStr + "T00:00:00")
-    const urgentDate = new Date(today)
-    urgentDate.setDate(today.getDate() + 3)
-
-    return activeMatch.sort((a, b) => {
-      const aScore = !a.due_date ? 3 : (new Date(a.due_date + "T00:00:00") <= urgentDate ? 1 : 2)
-      const bScore = !b.due_date ? 3 : (new Date(b.due_date + "T00:00:00") <= urgentDate ? 1 : 2)
-      if (aScore !== bScore) return aScore - bScore
-      // If same bucket, sort chronologically
-      if (a.due_date && b.due_date) return new Date(a.due_date) - new Date(b.due_date)
-      return 0
-    })
-  }, [categorizedTodos.allActive, wizardEnergy])
-
-  // --- Handlers ---
-  const mockIncrementGlobalStats = () => {
-    console.log("Stats incremented! +1 completada")
+  const toggleComplete = async (todo) => {
+    try {
+      const newCompleted = !todo.is_completed
+      const { error } = await supabase
+        .from('todos')
+        .update({ is_completed: newCompleted, completed_at: new Date().toISOString() })
+        .eq('id', todo.id)
+      if (error) throw error
+      await fetchData()
+    } catch (err) { console.error(err) }
   }
 
-  const toggleComplete = async (todo) => {
-    const isNowCompleted = !todo.is_completed
+  const uncompleteTask = async (todo) => {
     try {
       const { error } = await supabase
         .from('todos')
-        .update({ is_completed: isNowCompleted })
+        .update({ is_completed: false })
         .eq('id', todo.id)
-      
       if (error) throw error
-
-      setTodos(prev => prev.map(t => t.id === todo.id ? { ...t, is_completed: isNowCompleted } : t))
-      if (isNowCompleted) mockIncrementGlobalStats()
-    } catch (err) {
-      console.error('Error updating todo:', err)
-    }
+      await fetchData()
+    } catch (err) { console.error(err) }
   }
 
   const handleDelete = async (id) => {
@@ -152,313 +101,214 @@ export default function Todos() {
       const { error } = await supabase.from('todos').delete().eq('id', id)
       if (error) throw error
       setTodos(prev => prev.filter(t => t.id !== id))
-    } catch (err) {
-      console.error("Error deleting todo:", err)
-    }
+      setCompletedTodos(prev => prev.filter(t => t.id !== id))
+    } catch (err) { console.error(err) }
   }
 
   const getDaysLeftText = (dateStr) => {
-    const today = new Date()
-    today.setHours(0,0,0,0)
+    const today = new Date(); today.setHours(0,0,0,0)
     const due = new Date(dateStr + "T00:00:00")
-    
-    const diffTime = due - today
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    
-    if (diffDays < 0) return `Vencido (${Math.abs(diffDays)}d)`
-    if (diffDays === 0) return 'Hoy'
-    if (diffDays === 1) return 'Mañana'
-    return `Faltan ${diffDays}d`
+    const diff = Math.ceil((due - today) / (1000 * 60 * 60 * 24))
+    if (diff < 0) return `Vencido (${Math.abs(diff)}d)`
+    if (diff === 0) return 'Hoy'; if (diff === 1) return 'Mañana'
+    return `${diff}d`
   }
 
-  const renderTodoCard = (todo, bucketType) => {
-    const isUrgent = bucketType === 'urgent'
-    const style = ENERGY_STYLES[todo.energy_level] || ENERGY_STYLES['medium']
+  const activeTabResolved = useMemo(() => {
+    if (activeTab !== 'auto') return activeTab
+    if (categorizedTodos.hacerAhora.length > 0) return 'criticas'
+    if (categorizedTodos.agendado.length > 0) return 'agendadas'
+    if (categorizedTodos.bandeja.length > 0) return 'inbox'
+    return 'criticas'
+  }, [activeTab, categorizedTodos])
 
-    return (
-      <div 
-        key={todo.id} 
-        className={`group relative flex flex-col p-4 rounded-2xl border transition-all duration-300 ${todo.is_completed ? 'opacity-50 grayscale hover:opacity-100' : 'hover:shadow-2xl hover:-translate-y-1'}`}
-        style={{
-          background: 'var(--glass-bg)',
-          borderColor: isUrgent && !todo.is_completed ? 'rgba(225, 29, 72, 0.4)' : 'var(--border-subtle)',
-          boxShadow: isUrgent && !todo.is_completed ? '0 10px 40px -10px rgba(225, 29, 72, 0.15)' : 'none'
-        }}
-      >
-        <div className="flex gap-4">
-          <button
-            onClick={() => toggleComplete(todo)}
-            className="mt-1 flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200"
-            style={{
-              borderColor: todo.is_completed ? 'var(--text-secondary)' : style.color,
-              background: todo.is_completed ? 'var(--text-secondary)' : 'transparent'
-            }}
-          >
-            {todo.is_completed && (
-               <svg className="w-3 h-3 text-slate-900" fill="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth={4} /></svg>
-            )}
-          </button>
-          
-          <div className="flex-1 min-w-0">
-            <h4 className={`font-semibold text-[15px] truncate transition-all ${todo.is_completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-              {todo.title}
-            </h4>
-            
-            <div className="flex flex-wrap items-center gap-2 mt-3">
-              {/* Energy Tag */}
-              <span 
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] uppercase font-bold tracking-wider"
-                style={{ background: style.bg, color: style.color, border: `1px solid ${style.border}` }}
-              >
-                <span>{style.icon}</span> {style.label}
-              </span>
+  const activeList = useMemo(() => {
+    let list = []
+    switch (activeTabResolved) {
+      case 'criticas': list = categorizedTodos.hacerAhora; break
+      case 'agendadas': list = categorizedTodos.agendado; break
+      case 'inbox': list = categorizedTodos.bandeja; break
+      case 'completadas': list = completedTodos; break
+      default: return []
+    }
 
-              {/* Due Date Tag */}
-              {todo.due_date && (
-                <span 
-                  className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold"
-                  style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}
-                >
-                  ⏳ {getDaysLeftText(todo.due_date)}
-                </span>
-              )}
-              
-              {/* Focus Button */}
-              {isUrgent && !todo.is_completed && (
-                <button 
-                  onClick={() => navigate('/pomodoro')}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold transition-all hover:scale-105"
-                  style={{ background: 'var(--accent-gradient)', color: 'white', boxShadow: '0 4px 10px rgba(244,63,94,0.3)' }}
-                >
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 20.04c-1.25.687-2.779-.217-2.779-1.643V5.653z" /></svg>
-                  Enfocar
-                </button>
-              )}
-            </div>
-          </div>
-          
-          {/* Delete Button */}
-          <button
-            onClick={() => handleDelete(todo.id)}
-            className="opacity-0 group-hover:opacity-100 absolute top-4 right-4 p-1.5 rounded-lg transition-all hover:bg-slate-700 text-slate-400 hover:text-rose-500"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    )
-  }
+    const ENERGY_VAL = { high: 3, medium: 2, low: 1 }
+    
+    return [...list].sort((a, b) => {
+      // 1. Sort by energy high to low
+      const eA = ENERGY_VAL[a.energy_level || 'low']
+      const eB = ENERGY_VAL[b.energy_level || 'low']
+      if (eA !== eB) return eB - eA
+      
+      // 2. Sort by due_date if energy is the same
+      if (!a.due_date && !b.due_date) return 0
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return new Date(a.due_date) - new Date(b.due_date)
+    })
+  }, [activeTabResolved, categorizedTodos, completedTodos])
+
+  // Top focus task = first pending critical task
+  const focusTask = categorizedTodos.hacerAhora[0]
+
+  const totalPending = todos.length
+
+  const getEnergyInfo = (level) => ENERGY_MAP[level] || ENERGY_MAP.low
 
   return (
-    <div className="animate-fade-in-up pb-16 relative">
-      <div className="mb-8">
-        <h1 className="text-[32px] font-black tracking-tight text-slate-100">
-          To-Do / Bandeja
-        </h1>
-        <p className="text-[14px] text-slate-400 font-medium tracking-wide">
-          Matriz de Eisenhower y Recomendaciones
-        </p>
+    <div className="animate-fade-in-up">
+      {/* Header */}
+      <div className="screen-header">
+        <h1 className="screen-title">Tareas</h1>
+        <p className="screen-sub">{totalPending} pendientes</p>
       </div>
-      
-      {/* Mega Magic Button */}
-      <div className="mb-10 flex justify-center">
+
+      {/* Tabs */}
+      <div className="task-tabs">
         <button
-          onClick={() => {
-            setShowWizard(true)
-            setWizardEnergy(null)
-          }}
-          className="group relative px-6 sm:px-12 py-4 sm:py-5 rounded-3xl font-black text-lg sm:text-2xl tracking-tight overflow-hidden transition-all duration-300 hover:scale-[1.03] active:scale-95"
-          style={{ 
-             background: 'var(--accent-gradient)', // Primary Red/Rose gradient
-             color: '#fff',
-             boxShadow: '0 15px 40px -10px rgba(244, 63, 94, 0.6)'
-          }}
+          className={`task-tab ${activeTabResolved === 'criticas' ? 'active' : ''}`}
+          onClick={() => setActiveTab('criticas')}
         >
-          {/* Animated flare */}
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite]" />
-          <span className="relative flex items-center gap-3">
-            <span className="text-2xl sm:text-3xl animate-bounce">⚡</span> 
-            What can I do right now?
-          </span>
+          Críticas ({categorizedTodos.hacerAhora.length})
+        </button>
+        <button
+          className={`task-tab ${activeTabResolved === 'agendadas' ? 'active' : ''}`}
+          onClick={() => setActiveTab('agendadas')}
+        >
+          Agendadas ({categorizedTodos.agendado.length})
+        </button>
+        <button
+          className={`task-tab ${activeTabResolved === 'inbox' ? 'active' : ''}`}
+          onClick={() => setActiveTab('inbox')}
+        >
+          Inbox ({categorizedTodos.bandeja.length})
+        </button>
+        <button
+          className={`task-tab ${activeTabResolved === 'completadas' ? 'active' : ''}`}
+          onClick={() => setActiveTab('completadas')}
+        >
+          ✓ Hoy ({completedTodos.length})
         </button>
       </div>
 
+      {/* Focus card — only on Críticas tab when there's a focus task */}
+      {activeTabResolved === 'criticas' && focusTask && (
+        <div className="task-focus">
+          <div className="focus-label">🔥 Hacer ahora</div>
+          <div className="focus-title">{focusTask.title}</div>
+          <div className="focus-meta">
+            {focusTask.due_date && getDaysLeftText(focusTask.due_date)}
+          </div>
+          <button className="focus-btn" onClick={() => navigate('/pomodoro')}>
+            Iniciar Pomodoro
+          </button>
+        </div>
+      )}
+
+      {/* Loading */}
       {loading ? (
-        <div className="flex justify-center py-20">
-          <svg className="animate-spin w-8 h-8 text-rose-500" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" /><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" /></svg>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
+          <svg className="animate-spin" style={{ width: 24, height: 24, color: 'var(--text3)' }} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" style={{ opacity: 0.25 }} />
+            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style={{ opacity: 0.75 }} />
+          </svg>
         </div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 lg:gap-10">
-          
-          {/* URGENT COLUMN */}
-          <div className="xl:col-span-5 space-y-4">
-             <div className="flex items-center gap-3 mb-6 px-2">
-               <div className="w-10 h-10 rounded-[14px] flex items-center justify-center bg-gradient-to-br from-rose-500 to-orange-500 shadow-lg shadow-rose-500/20">
-                 <span className="text-xl">🚨</span>
-               </div>
-               <div>
-                 <h2 className="text-lg font-black text-slate-100">Hacer Ahora</h2>
-                 <p className="text-[11px] uppercase tracking-wider font-bold text-rose-500/80">Crítico (≤ 3 Días)</p>
-               </div>
-             </div>
-             
-             <div className="flex flex-col gap-3">
-               {categorizedTodos.hacerAhora.length === 0 ? (
-                  <div className="text-center py-10 px-6 border border-slate-700/50 border-dashed rounded-3xl bg-slate-800/20 text-slate-500">
-                    Ningún incendio activo hoy. 🔥🧯
-                  </div>
-               ) : (
-                  categorizedTodos.hacerAhora.map(t => renderTodoCard(t, 'urgent'))
-               )}
-             </div>
-          </div>
-
-          {/* PLANNED & INBOX COLUMN */}
-          <div className="xl:col-span-4 space-y-4">
-             <div className="flex items-center gap-3 mb-6 px-2">
-               <div className="w-10 h-10 rounded-[14px] flex items-center justify-center bg-emerald-500/20 border border-emerald-500/30">
-                 <span className="text-xl">📅</span>
-               </div>
-               <div>
-                 <h2 className="text-lg font-black text-slate-100">Agendado</h2>
-                 <p className="text-[11px] uppercase tracking-wider font-bold text-emerald-500/80">Futuras (&gt; 3 Días)</p>
-               </div>
-             </div>
-
-             <div className="flex flex-col gap-3 mb-12">
-               {categorizedTodos.agendado.length === 0 ? (
-                  <div className="text-center py-6 px-6 border border-slate-700/50 border-dashed rounded-3xl bg-slate-800/20 text-slate-500 text-sm">
-                    Agenda vacía.
-                  </div>
-               ) : (
-                  categorizedTodos.agendado.map(t => renderTodoCard(t, 'planned'))
-               )}
-             </div>
-
-             <div className="flex items-center gap-3 mb-6 px-2">
-               <div className="w-10 h-10 rounded-[14px] flex items-center justify-center bg-slate-800 border border-slate-700">
-                 <span className="text-xl">📥</span>
-               </div>
-               <div>
-                 <h2 className="text-lg font-black text-slate-100">Inbox</h2>
-                 <p className="text-[11px] uppercase tracking-wider font-bold text-slate-500">Sin Fecha</p>
-               </div>
-             </div>
-
-             <div className="flex flex-col gap-3">
-               {categorizedTodos.bandeja.map(t => renderTodoCard(t, 'inbox'))}
-             </div>
-          </div>
-          
-          {/* STATS PANE (RIGHT) */}
-          <div className="xl:col-span-3">
-            <div className="sticky top-24 p-6 rounded-[2rem] border border-slate-700/50 bg-slate-800/40 backdrop-blur-xl">
-              <h3 className="font-bold text-slate-300 mb-6 text-sm uppercase tracking-widest text-center">Resumen Eisenhower</h3>
-              
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/50 border border-slate-800">
-                  <span className="text-rose-500 font-bold text-sm">🔥🔥 Críticas</span>
-                  <span className="text-slate-300 font-black">{categorizedTodos.hacerAhora.filter(t => !t.is_completed).length}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/50 border border-slate-800">
-                  <span className="text-emerald-500 font-bold text-sm">📅 Agendadas</span>
-                  <span className="text-slate-300 font-black">{categorizedTodos.agendado.filter(t => !t.is_completed).length}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/50 border border-slate-800">
-                  <span className="text-slate-400 font-bold text-sm">📥 Inbox</span>
-                  <span className="text-slate-300 font-black">{categorizedTodos.bandeja.filter(t => !t.is_completed).length}</span>
-                </div>
-              </div>
+        <div key={activeTabResolved} className="anim-tab-slide" style={{ paddingBottom: 60 }}>
+          {activeList.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text3)', fontSize: 14 }}>
+              {activeTabResolved === 'completadas' ? 'No hay tareas completadas en las últimas 24h' : 'Sin tareas en esta categoría'}
             </div>
-          </div>
+          ) : activeTabResolved === 'completadas' ? (
+            /* Completed tasks tab */
+            activeList.map(todo => {
+              const energy = getEnergyInfo(todo.energy_level)
+              return (
+                <div key={todo.id} className="task-row" style={{ position: 'relative' }}>
+                  {/* Undo button */}
+                  <button
+                    onClick={() => uncompleteTask(todo)}
+                    style={{
+                      width: 20, height: 20, borderRadius: 5,
+                      background: 'var(--text3)', border: 'none',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer', flexShrink: 0, marginTop: 1,
+                      transition: 'all 0.2s'
+                    }}
+                    title="Desmarcar"
+                  >
+                    <svg style={{ width: 12, height: 12, color: 'white' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </button>
 
-        </div>
-      )}
-
-
-      {/* MODAL: WHAT CAN I DO NOW? */}
-      {showWizard && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setShowWizard(false)} />
-          
-          <div className="relative z-10 w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-[2.5rem] p-6 sm:p-10 shadow-2xl animate-fade-in-up">
-            
-            <button onClick={() => setShowWizard(false)} className="absolute top-6 right-6 p-2 rounded-full bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-
-            {!wizardEnergy ? (
-              // STEP 1: SELECT ENERGY
-              <div className="text-center pb-6">
-                <div className="w-20 h-20 mx-auto bg-slate-800 rounded-3xl flex items-center justify-center mb-6 border border-slate-700 shadow-xl">
-                  <span className="text-4xl animate-pulse">⚡</span>
-                </div>
-                <h2 className="text-2xl sm:text-3xl font-black text-slate-100 mb-2">How much energy do you have <span className="text-transparent bg-clip-text bg-gradient-to-r from-rose-400 to-orange-500">right now?</span></h2>
-                <p className="text-slate-400 font-medium mb-10">Match your next task to your current state.</p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {Object.entries(ENERGY_STYLES).map(([key, style]) => (
-                    <button
-                      key={key}
-                      onClick={() => setWizardEnergy(key)}
-                      className="flex flex-col items-center p-6 rounded-[2rem] border transition-all duration-300 hover:scale-105 group"
-                      style={{ background: 'var(--glass-bg)', borderColor: style.border }}
-                    >
-                      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110" style={{ background: style.bg, color: style.color }}>
-                        <span className="text-3xl">{style.icon}</span>
-                      </div>
-                      <h3 className="font-bold text-slate-200 text-lg mb-1">{style.label}</h3>
-                      <p className="text-[11px] text-slate-500 uppercase tracking-widest font-bold">Energía</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              // STEP 2: RECOMMENDATIONS
-              <div className="pb-4">
-                <button onClick={() => setWizardEnergy(null)} className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-200 mb-6 font-bold transition-colors">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-                  Volver
-                </button>
-
-                <div className="flex items-center gap-4 mb-8 pb-6 border-b border-slate-800">
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: ENERGY_STYLES[wizardEnergy].bg, color: ENERGY_STYLES[wizardEnergy].color, border: `1px solid ${ENERGY_STYLES[wizardEnergy].border}` }}>
-                    <span className="text-2xl">{ENERGY_STYLES[wizardEnergy].icon}</span>
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-black text-slate-100">Matching Tasks</h2>
-                    <p className="text-slate-400 text-sm">Sorted by Eisenhower urgency.</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
-                  {wizardRecommendations.length === 0 ? (
-                    <div className="text-center py-12">
-                      <p className="text-slate-500 text-lg mb-2">No tienes tareas pendientes para este nivel de energía.</p>
-                      <span className="text-4xl">🎉</span>
+                  {/* Task info */}
+                  <div className="task-info">
+                    <div className="task-name completed">{todo.title}</div>
+                    <div className="task-meta">
+                      <div className={`priority-dot ${energy.dotClass}`} />
+                      <span>
+                        {energy.label}
+                        {todo.due_date && ` · ${getDaysLeftText(todo.due_date)}`}
+                      </span>
                     </div>
-                  ) : (
-                    wizardRecommendations.map((todo, idx) => (
-                      <div key={todo.id} className="relative">
-                         {/* Highlight the #1 recommendation */}
-                         {idx === 0 && (
-                            <div className="absolute -left-12 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-rose-500 flex items-center justify-center shadow-[0_0_20px_rgba(244,63,94,0.5)] hidden sm:flex">
-                              <span className="text-white text-xs font-black">#1</span>
-                            </div>
-                         )}
-                         {renderTodoCard(todo, todo.due_date ? (new Date(todo.due_date) <= new Date(new Date().setDate(new Date().getDate() + 3)) ? 'urgent' : 'planned') : 'inbox')}
-                      </div>
-                    ))
-                  )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )
+            })
+          ) : (
+            /* Pending tasks */
+            activeList.map(todo => {
+              const energy = getEnergyInfo(todo.energy_level)
+              return (
+                <div key={todo.id} className="task-row" style={{ position: 'relative' }}>
+                  {/* Rounded checkbox */}
+                  <div
+                    className="task-sq"
+                    onClick={() => toggleComplete(todo)}
+                  >
+                  </div>
+
+                  {/* Task info */}
+                  <div className="task-info">
+                    <div className="task-name">{todo.title}</div>
+                    <div className="task-meta">
+                      <div className={`priority-dot ${energy.dotClass}`} />
+                      <span>
+                        {energy.label}
+                        {todo.due_date && ` · ${getDaysLeftText(todo.due_date)}`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Delete */}
+                  <button
+                    onClick={() => handleDelete(todo.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                      color: 'var(--text3)', fontSize: 12, position: 'absolute', top: 10, right: 0,
+                      opacity: 0, transition: 'opacity 0.2s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                    onMouseLeave={e => e.currentTarget.style.opacity = 0}
+                    title="Eliminar"
+                  >✕</button>
+                </div>
+              )
+            })
+          )}
         </div>
       )}
 
+      {/* FAB */}
+      <button className="fab" onClick={() => setModalOpen(true)}>+</button>
+
+      {/* Task Form Modal */}
+      <TaskFormModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSave={() => fetchData()}
+      />
     </div>
   )
 }
