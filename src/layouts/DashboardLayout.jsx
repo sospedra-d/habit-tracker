@@ -1,12 +1,20 @@
 import { useRef, useCallback } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 
+const FocusIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <circle cx="10" cy="10" r="8.5" />
+    <line x1="10" y1="10" x2="10" y2="4" />
+    <line x1="10" y1="10" x2="15" y2="10" />
+  </svg>
+)
+
 const navItems = [
   { to: '/tareas', label: 'Tareas', icon: '☰' },
   { to: '/habits', label: 'Hábitos', icon: '○' },
   { to: '/hoy', label: 'Hoy', icon: '◆', isCenter: true },
   { to: '/metas', label: 'Metas', icon: '⚑' },
-  { to: '/pomodoro', label: 'Focus', icon: '⏱' },
+  { to: '/pomodoro', label: 'Focus', icon: null, IconComponent: FocusIcon },
 ]
 
 const routes = navItems.map(n => n.to)
@@ -15,8 +23,6 @@ export default function DashboardLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const touchRef = useRef({ startX: 0, startY: 0 })
-
-  const currentIndex = routes.indexOf(location.pathname)
 
   const onTouchStart = useCallback((e) => {
     const touch = e.touches[0]
@@ -36,38 +42,38 @@ export default function DashboardLayout() {
     if (idx === -1) return
 
     if (deltaX > 0 && idx < routes.length - 1) {
-      // Swipe left → next tab
       navigate(routes[idx + 1])
     } else if (deltaX < 0 && idx > 0) {
-      // Swipe right → previous tab
       navigate(routes[idx - 1])
     }
   }, [navigate, location.pathname])
 
   return (
     <div className="screen-container" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-      {/* Main content with swipe transition */}
       <main className="screen-content">
         <div key={location.pathname} className="anim-tab-slide">
           <Outlet />
         </div>
       </main>
 
-      {/* Bottom Navigation Bar */}
       <nav className="bottom-nav">
-        {navItems.map(item => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              `nav-item ${isActive ? 'active' : ''} ${item.isCenter ? 'center-item' : ''}`
-            }
-          >
-            <span className="nav-icon">{item.icon}</span>
-            <span className="nav-label">{item.label}</span>
-            <span className="nav-dot" />
-          </NavLink>
-        ))}
+        {navItems.map(item => {
+          const isActive = location.pathname === item.to
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end
+              className={`nav-item ${isActive ? 'active' : ''} ${item.isCenter ? 'center-item' : ''}`}
+            >
+              <span className="nav-icon">
+                {item.IconComponent ? <item.IconComponent /> : item.icon}
+              </span>
+              <span className="nav-label">{item.label}</span>
+              <span className="nav-dot" />
+            </NavLink>
+          )
+        })}
       </nav>
     </div>
   )
