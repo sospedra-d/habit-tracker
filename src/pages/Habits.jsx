@@ -261,26 +261,6 @@ export default function Habits() {
     }
   }
 
-  const simulatePastCheck = async (habit) => {
-    try {
-      // DEV: Insertar log de ayer solamente
-      const yd = new Date()
-      yd.setDate(yd.getDate() - 1)
-      const yesterdayStr = yd.toISOString().split('T')[0]
-
-      await supabase
-        .from('habit_logs')
-        .upsert(
-          [{ habit_id: habit.id, completed_at: yesterdayStr, count: 1 }],
-          { onConflict: 'habit_id, completed_at', ignoreDuplicates: true }
-        )
-
-      await fetchData()
-    } catch (err) {
-      console.error(err)
-      alert('Error DEV: ' + err.message)
-    }
-  }
 
   const openEdit = (habit) => {
     setEditingHabit(habit)
@@ -478,17 +458,6 @@ export default function Habits() {
                         >
                           ✎
                         </button>
-                        
-                        {/* DEV button */}
-                        <button
-                          onClick={() => simulatePastCheck(habit)}
-                          style={{
-                            border: '1px dashed #facc15', color: '#facc15', background: 'transparent',
-                            fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
-                            fontWeight: 'bold', marginLeft: 4, flexShrink: 0
-                          }}
-                          title="DEV: Inserta log de ayer"
-                        >DEV</button>
 
                         {/* Badge */}
                         <span className={`habit-badge ${habit.is_core ? 'badge-nucleo' : 'badge-extra'}`}>
