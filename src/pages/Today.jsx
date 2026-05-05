@@ -539,9 +539,11 @@ export default function Today() {
                 )}
               </div>
             ) : (
-              <div className="task-focus" style={{ textAlign: 'center', padding: '24px 16px' }}>
-                <div style={{ fontSize: 14, color: 'var(--text3)' }}>🎯 Sin tareas pendientes</div>
-                <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>¡Buen trabajo!</div>
+              <div style={{ textAlign: 'center', padding: '28px 16px' }}>
+                <div style={{ fontSize: 36, color: '#c9963a', marginBottom: 8, lineHeight: 1 }}>✓</div>
+                <div style={{ fontSize: 14, color: '#a1a1aa', lineHeight: 1.5 }}>
+                  Sin tareas pendientes. ¡Centra tu energía en los hábitos!
+                </div>
               </div>
             )}
           </div>

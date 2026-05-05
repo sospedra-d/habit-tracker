@@ -481,6 +481,7 @@ export default function Habits() {
         isOpen={modalOpen}
         onClose={() => { setModalOpen(false); setEditingHabit(null) }}
         onSave={handleSave}
+        onDelete={handleDelete}
         editingHabit={editingHabit}
       />
     </div>

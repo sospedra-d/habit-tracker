@@ -162,8 +162,8 @@ export default function Dashboard({ embedded = false }) {
       const scheduledCoreCount = habits.filter(h => h.is_core && (h.days_of_week?.includes(dayOfWeek) ?? true)).length
       const scheduledExtraCount = habits.filter(h => !h.is_core && (h.days_of_week?.includes(dayOfWeek) ?? true)).length
       const allCoreComplete = scheduledCoreCount > 0 && coreCount >= scheduledCoreCount
-      const allExtrasComplete = scheduledExtraCount > 0 && extraCount >= scheduledExtraCount
-      const isLegendary = allCoreComplete && allExtrasComplete
+      const halfExtrasComplete = scheduledExtraCount > 0 && extraCount >= Math.ceil(scheduledExtraCount * 0.5)
+      const isLegendary = allCoreComplete && halfExtrasComplete
       const hasExtras = extraCount > 0
 
       // Determine bar color
@@ -206,9 +206,9 @@ export default function Dashboard({ embedded = false }) {
       const scheduledCoreCount = habits.filter(h => h.is_core && (h.days_of_week?.includes(dayOfWeek) ?? true)).length
       const scheduledExtraCount = habits.filter(h => !h.is_core && (h.days_of_week?.includes(dayOfWeek) ?? true)).length
       const allCoreComplete = scheduledCoreCount > 0 && coreCompletedOnDay >= scheduledCoreCount
-      const allExtrasComplete = scheduledExtraCount > 0 && extraCompletedOnDay >= scheduledExtraCount
+      const halfExtrasComplete = scheduledExtraCount > 0 && extraCompletedOnDay >= Math.ceil(scheduledExtraCount * 0.5)
       const hasExtras = allCoreComplete && extraCompletedOnDay > 0
-      const isLegendary = allCoreComplete && allExtrasComplete
+      const isLegendary = allCoreComplete && halfExtrasComplete
 
       return { date: dateStr, count, hasExtras, isLegendary }
     })

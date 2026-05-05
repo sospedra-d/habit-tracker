@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useState } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 
 const FocusIcon = () => (
@@ -22,36 +22,101 @@ const routes = navItems.map(n => n.to)
 export default function DashboardLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const touchRef = useRef({ startX: 0, startY: 0 })
+  const touchRef = useRef({ startX: 0, startY: 0, swiping: false, decided: false })
+  const [swipeOffset, setSwipeOffset] = useState(0)
+  const [swipeTransition, setSwipeTransition] = useState(false)
 
   const onTouchStart = useCallback((e) => {
     const touch = e.touches[0]
-    touchRef.current = { startX: touch.clientX, startY: touch.clientY }
+    touchRef.current = { startX: touch.clientX, startY: touch.clientY, swiping: false, decided: false }
+    setSwipeTransition(false)
+    setSwipeOffset(0)
   }, [])
 
-  const onTouchEnd = useCallback((e) => {
-    const touch = e.changedTouches[0]
-    const deltaX = touchRef.current.startX - touch.clientX
-    const deltaY = Math.abs(touchRef.current.startY - touch.clientY)
+  const onTouchMove = useCallback((e) => {
+    const touch = e.touches[0]
+    const deltaX = touch.clientX - touchRef.current.startX
+    const deltaY = Math.abs(touch.clientY - touchRef.current.startY)
     const absDeltaX = Math.abs(deltaX)
 
-    // Only swipe if horizontal movement > 50px and greater than vertical movement
-    if (absDeltaX < 50 || deltaY > absDeltaX) return
+    // Decide direction once
+    if (!touchRef.current.decided) {
+      if (absDeltaX > 10 || deltaY > 10) {
+        touchRef.current.decided = true
+        touchRef.current.swiping = absDeltaX > deltaY
+      }
+      return
+    }
 
+    if (!touchRef.current.swiping) return
+
+    // Check boundaries
     const idx = routes.indexOf(location.pathname)
     if (idx === -1) return
 
-    if (deltaX > 0 && idx < routes.length - 1) {
-      navigate(routes[idx + 1])
-    } else if (deltaX < 0 && idx > 0) {
-      navigate(routes[idx - 1])
+    // Limit swipe at edges
+    if (deltaX > 0 && idx === 0) {
+      setSwipeOffset(deltaX * 0.2) // resistance at edge
+    } else if (deltaX < 0 && idx === routes.length - 1) {
+      setSwipeOffset(deltaX * 0.2) // resistance at edge
+    } else {
+      setSwipeOffset(deltaX)
     }
-  }, [navigate, location.pathname])
+  }, [location.pathname])
+
+  const onTouchEnd = useCallback((e) => {
+    if (!touchRef.current.swiping) {
+      setSwipeOffset(0)
+      return
+    }
+
+    const idx = routes.indexOf(location.pathname)
+    if (idx === -1) {
+      setSwipeOffset(0)
+      return
+    }
+
+    const threshold = 80
+
+    if (swipeOffset < -threshold && idx < routes.length - 1) {
+      // Swipe left → next tab
+      setSwipeTransition(true)
+      setSwipeOffset(-window.innerWidth)
+      setTimeout(() => {
+        navigate(routes[idx + 1])
+        setSwipeOffset(0)
+        setSwipeTransition(false)
+      }, 250)
+    } else if (swipeOffset > threshold && idx > 0) {
+      // Swipe right → prev tab
+      setSwipeTransition(true)
+      setSwipeOffset(window.innerWidth)
+      setTimeout(() => {
+        navigate(routes[idx - 1])
+        setSwipeOffset(0)
+        setSwipeTransition(false)
+      }, 250)
+    } else {
+      // Snap back
+      setSwipeTransition(true)
+      setSwipeOffset(0)
+      setTimeout(() => setSwipeTransition(false), 200)
+    }
+
+    touchRef.current.swiping = false
+  }, [navigate, location.pathname, swipeOffset])
 
   return (
-    <div className="screen-container" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+    <div className="screen-container" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
       <main className="screen-content">
-        <div key={location.pathname} className="anim-tab-slide">
+        <div
+          key={location.pathname}
+          style={{
+            transform: `translateX(${swipeOffset}px)`,
+            transition: swipeTransition ? 'transform 0.25s ease-out' : 'none',
+            willChange: 'transform'
+          }}
+        >
           <Outlet />
         </div>
       </main>

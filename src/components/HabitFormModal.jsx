@@ -16,7 +16,7 @@ const CATEGORY_COLORS = {
   'Otro': '#52525b',
 }
 
-export default function HabitFormModal({ isOpen, onClose, onSave, editingHabit }) {
+export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, editingHabit }) {
   const [name, setName] = useState('')
   const [category, setCategory] = useState('Salud')
   const [selectedDays, setSelectedDays] = useState([])
@@ -263,6 +263,26 @@ export default function HabitFormModal({ isOpen, onClose, onSave, editingHabit }
               {saving ? 'Guardando...' : editingHabit ? 'Guardar' : 'Crear'}
             </button>
           </div>
+
+          {/* Delete button — only when editing */}
+          {editingHabit && onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm('¿Seguro que quieres eliminar este hábito? Esta acción no se puede deshacer')) {
+                  onDelete(editingHabit.id)
+                  onClose()
+                }
+              }}
+              style={{
+                width: '100%', padding: 12, borderRadius: 12, fontSize: 14, fontWeight: 600,
+                background: 'transparent', border: '1px solid rgba(220,32,32,0.3)',
+                color: '#dc2020', cursor: 'pointer', marginTop: 4
+              }}
+            >
+              Eliminar hábito
+            </button>
+          )}
         </form>
       </div>
     </div>

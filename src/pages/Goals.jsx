@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import Dashboard from './Dashboard'
 
@@ -256,7 +256,7 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete }) {
   )
 }
 
-// ─── Legacy Section (collapsible goals) ───
+// ─── Legacy Section (collapsible goals + habit challenges) ───
 function LegacySection() {
   const [achievements, setAchievements] = useState([])
   const [loading, setLoading] = useState(true)
@@ -291,63 +291,113 @@ function LegacySection() {
     setExpandedId(a.id)
   }
 
+  // Separate goal achievements from habit challenges
+  const goalAchievements = achievements.filter(a => a.type === 'goal')
+  const habitChallenges = achievements.filter(a => a.type === 'habit_challenge')
+
+  // De-duplicate habit challenges: keep only highest challenge_days per habit name
+  const uniqueChallenges = useMemo(() => {
+    const byName = {}
+    habitChallenges.forEach(c => {
+      const name = c.name
+      if (!byName[name] || (c.challenge_days || 0) > (byName[name].challenge_days || 0)) {
+        byName[name] = c
+      }
+    })
+    // Sort by most recent first
+    return Object.values(byName).sort((a, b) => new Date(b.achieved_at) - new Date(a.achieved_at))
+  }, [habitChallenges])
+
   if (loading) return null
+
+  const hasGoals = goalAchievements.length > 0
+  const hasChallenges = uniqueChallenges.length > 0
 
   return (
     <div style={{ marginTop: 24 }}>
       <div className="section-label">Legado</div>
-      {achievements.length === 0 ? (
+      {!hasGoals && !hasChallenges ? (
         <div style={{ textAlign:'center', padding:'32px 0', color:'#a1a1aa', fontSize:14 }}>
           Aquí aparecerán tus logros
         </div>
       ) : (
-        <div style={{ display:'flex', flexDirection:'column' }}>
-          {achievements.map((a, i) => {
-            const isGoal = a.type === 'goal'
-            const isExpanded = expandedId === a.id
+        <>
+          {/* Completed goals */}
+          {hasGoals && (
+            <div style={{ display:'flex', flexDirection:'column' }}>
+              {goalAchievements.map((a, i) => {
+                const isExpanded = expandedId === a.id
 
-            return (
-              <div key={a.id}>
-                <div onClick={() => toggleExpand(a)} style={{
-                  display:'flex', alignItems:'center', gap:12, padding:'14px 0',
-                  borderBottom: (i < achievements.length - 1 && !isExpanded) ? '1px solid rgba(255,255,255,0.06)' : 'none',
-                  cursor: isGoal ? 'pointer' : 'default'
-                }}>
-                  <span style={{ fontSize:18 }}>{isGoal ? '🚩' : '🏅'}</span>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:14, color:'var(--text1)', fontWeight:500 }}>{a.name}</div>
-                    <div style={{ fontSize:12, color:'var(--text3)', marginTop:2 }}>
-                      {new Date(a.achieved_at).toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' })}
+                return (
+                  <div key={a.id}>
+                    <div onClick={() => toggleExpand(a)} style={{
+                      display:'flex', alignItems:'center', gap:12, padding:'14px 0',
+                      borderBottom: (i < goalAchievements.length - 1 && !isExpanded) ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                      cursor: 'pointer'
+                    }}>
+                      <span style={{ fontSize:18 }}>🚩</span>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:14, color:'var(--text1)', fontWeight:500 }}>{a.name}</div>
+                        <div style={{ fontSize:12, color:'var(--text3)', marginTop:2 }}>
+                          {new Date(a.achieved_at).toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' })}
+                        </div>
+                      </div>
+                      <span style={{
+                        fontSize:12, color:'var(--text3)', transition:'transform 0.2s',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', display:'inline-block'
+                      }}>›</span>
+                    </div>
+
+                    {/* Expanded milestones */}
+                    <div style={{
+                      overflow:'hidden', maxHeight: isExpanded ? 500 : 0, opacity: isExpanded ? 1 : 0,
+                      transition:'max-height 0.2s ease, opacity 0.2s ease',
+                      borderBottom: isExpanded && i < goalAchievements.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
+                    }}>
+                      {expandedMilestones.map(m => (
+                        <div key={m.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0 8px 30px' }}>
+                          <span style={{ fontSize:12, color:'var(--gold)' }}>✓</span>
+                          <span style={{ fontSize:13, color:'var(--text2)' }}>{m.title}</span>
+                        </div>
+                      ))}
+                      {expandedMilestones.length === 0 && isExpanded && (
+                        <div style={{ padding:'8px 0 8px 30px', fontSize:12, color:'var(--text3)' }}>Sin hitos registrados</div>
+                      )}
                     </div>
                   </div>
-                  {isGoal && (
-                    <span style={{
-                      fontSize:12, color:'var(--text3)', transition:'transform 0.2s',
-                      transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', display:'inline-block'
-                    }}>›</span>
-                  )}
-                </div>
+                )
+              })}
+            </div>
+          )}
 
-                {/* Expanded milestones */}
-                <div style={{
-                  overflow:'hidden', maxHeight: isExpanded ? 500 : 0, opacity: isExpanded ? 1 : 0,
-                  transition:'max-height 0.2s ease, opacity 0.2s ease',
-                  borderBottom: isExpanded && i < achievements.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
-                }}>
-                  {expandedMilestones.map(m => (
-                    <div key={m.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0 8px 30px' }}>
-                      <span style={{ fontSize:12, color:'var(--gold)' }}>✓</span>
-                      <span style={{ fontSize:13, color:'var(--text2)' }}>{m.title}</span>
+          {/* Retos superados — habit challenges */}
+          {hasChallenges && (
+            <div style={{ marginTop: hasGoals ? 20 : 0 }}>
+              <div className="section-label">Retos superados</div>
+              <div style={{ display:'flex', flexDirection:'column' }}>
+                {uniqueChallenges.map((c, i) => (
+                  <div key={c.id} style={{
+                    display:'flex', alignItems:'center', gap:12, padding:'14px 0',
+                    borderBottom: i < uniqueChallenges.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none'
+                  }}>
+                    <span style={{ fontSize:18 }}>🏅</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:14, color:'var(--text1)', fontWeight:500 }}>
+                        {c.name}
+                        <span style={{ color:'var(--gold)', marginLeft:6, fontSize:12, fontWeight:400 }}>
+                          {c.challenge_days ? `${c.challenge_days} días consecutivos` : ''}
+                        </span>
+                      </div>
+                      <div style={{ fontSize:12, color:'var(--text3)', marginTop:2 }}>
+                        {new Date(c.achieved_at).toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' })}
+                      </div>
                     </div>
-                  ))}
-                  {expandedMilestones.length === 0 && isExpanded && (
-                    <div style={{ padding:'8px 0 8px 30px', fontSize:12, color:'var(--text3)' }}>Sin hitos registrados</div>
-                  )}
-                </div>
+                  </div>
+                ))}
               </div>
-            )
-          })}
-        </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
