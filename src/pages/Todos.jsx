@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
 import TaskFormModal from '../components/TaskFormModal'
@@ -7,6 +7,92 @@ const ENERGY_MAP = {
   high: { label: 'Alta', color: '#f97316', dotClass: 'p-alta' },
   medium: { label: 'Media', color: 'var(--blue)', dotClass: 'p-media' },
   low: { label: 'Baja', color: 'var(--text3)', dotClass: 'p-baja' }
+}
+
+// Swipeable task row component — iOS-style swipe-to-delete
+function SwipeableTaskRow({ todo, children, onDelete }) {
+  const touchRef = useRef({ startX: 0, startY: 0, swiping: false })
+  const [offsetX, setOffsetX] = useState(0)
+  const [transitioning, setTransitioning] = useState(false)
+
+  const onTouchStart = (e) => {
+    const touch = e.touches[0]
+    touchRef.current = { startX: touch.clientX, startY: touch.clientY, swiping: false }
+    setTransitioning(false)
+  }
+
+  const onTouchMove = (e) => {
+    const touch = e.touches[0]
+    const deltaX = touch.clientX - touchRef.current.startX
+    const deltaY = Math.abs(touch.clientY - touchRef.current.startY)
+
+    if (!touchRef.current.swiping) {
+      if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > deltaY) {
+        touchRef.current.swiping = true
+      } else if (deltaY > 10) {
+        return
+      }
+    }
+
+    if (touchRef.current.swiping && deltaX < 0) {
+      setOffsetX(Math.max(deltaX, -80))
+    }
+  }
+
+  const onTouchEnd = () => {
+    setTransitioning(true)
+    if (offsetX < -50) {
+      setOffsetX(-72)
+    } else {
+      setOffsetX(0)
+    }
+    touchRef.current.swiping = false
+  }
+
+  const handleDelete = () => {
+    if (confirm('¿Seguro que quieres eliminar esta tarea?')) {
+      onDelete(todo.id)
+    }
+    setTransitioning(true)
+    setOffsetX(0)
+  }
+
+  return (
+    <div style={{ position: 'relative', overflow: 'hidden' }}>
+      {/* Delete zone behind */}
+      <div style={{
+        position: 'absolute', top: 0, right: 0, bottom: 0, width: 72,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#dc2020'
+      }}>
+        <button
+          onClick={handleDelete}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: 'white', fontSize: 18, padding: 8
+          }}
+          title="Eliminar"
+        >
+          🗑
+        </button>
+      </div>
+      {/* Swipeable content */}
+      <div
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{
+          transform: `translateX(${offsetX}px)`,
+          transition: transitioning ? 'transform 0.25s ease-out' : 'none',
+          position: 'relative',
+          zIndex: 1,
+          background: 'var(--app-bg)'
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  )
 }
 
 export default function Todos() {
@@ -257,43 +343,32 @@ export default function Todos() {
               )
             })
           ) : (
-            /* Pending tasks */
+            /* Pending tasks — swipe-to-delete */
             activeList.map(todo => {
               const energy = getEnergyInfo(todo.energy_level)
               return (
-                <div key={todo.id} className="task-row" style={{ position: 'relative' }}>
-                  {/* Rounded checkbox */}
-                  <div
-                    className="task-sq"
-                    onClick={() => toggleComplete(todo)}
-                  >
-                  </div>
+                <SwipeableTaskRow key={todo.id} todo={todo} onDelete={handleDelete}>
+                  <div className="task-row" style={{ position: 'relative' }}>
+                    {/* Rounded checkbox */}
+                    <div
+                      className="task-sq"
+                      onClick={() => toggleComplete(todo)}
+                    >
+                    </div>
 
-                  {/* Task info */}
-                  <div className="task-info">
-                    <div className="task-name">{todo.title}</div>
-                    <div className="task-meta">
-                      <div className={`priority-dot ${energy.dotClass}`} />
-                      <span>
-                        {energy.label}
-                        {todo.due_date && ` · ${getDaysLeftText(todo.due_date)}`}
-                      </span>
+                    {/* Task info */}
+                    <div className="task-info">
+                      <div className="task-name">{todo.title}</div>
+                      <div className="task-meta">
+                        <div className={`priority-dot ${energy.dotClass}`} />
+                        <span>
+                          {energy.label}
+                          {todo.due_date && ` · ${getDaysLeftText(todo.due_date)}`}
+                        </span>
+                      </div>
                     </div>
                   </div>
-
-                  {/* Delete */}
-                  <button
-                    onClick={() => handleDelete(todo.id)}
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-                      color: 'var(--text3)', fontSize: 12, position: 'absolute', top: 10, right: 0,
-                      opacity: 0, transition: 'opacity 0.2s'
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = 1}
-                    onMouseLeave={e => e.currentTarget.style.opacity = 0}
-                    title="Eliminar"
-                  >✕</button>
-                </div>
+                </SwipeableTaskRow>
               )
             })
           )}
