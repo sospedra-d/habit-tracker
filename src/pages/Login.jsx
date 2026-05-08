@@ -18,7 +18,8 @@ export default function Login() {
     const aliasMap = {
       dani: 'danisospedra22@gmail.com',
       javi: 'javi.deberaga@gmail.com',
-      isma: 'ismasandersamador@gmail.com'
+      isma: 'ismasandersamador@gmail.com',
+      aitana: 'aitanagrlu@gmail.com'
     }
 
     const loginEmail = aliasMap[email.toLowerCase().trim()] || email.trim()
@@ -83,7 +84,7 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 rounded-lg text-sm bg-neutral-950 border border-neutral-800 text-stone-300 placeholder:text-stone-600 focus:outline-none focus:border-neutral-600 transition-colors"
-                  placeholder="Tu email o nombre (dani, javi, isma)"
+                  placeholder="Tu usuario (dani, javi, isma, aitana)"
                 />
               </div>
             </div>
