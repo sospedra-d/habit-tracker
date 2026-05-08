@@ -26,6 +26,7 @@ export default function Today() {
   const [loading, setLoading] = useState(true)
   const [todos, setTodos] = useState([])
   const [completedTodosCount, setCompletedTodosCount] = useState(0)
+  const [pomodoroSessions, setPomodoroSessions] = useState(0)
   const [habits, setHabits] = useState([])
   const [habitLogs, setHabitLogs] = useState([])
   const [challengeLogs, setChallengeLogs] = useState([])
@@ -43,6 +44,8 @@ export default function Today() {
   const prevLegendaryRef = useRef(false)
   const prevProdRef = useRef(null)
   const [prodFlip, setProdFlip] = useState(false)
+  const [coreStreak, setCoreStreak] = useState(0)
+  const [coreStreakRecovery, setCoreStreakRecovery] = useState(false)
 
   const navigate = useNavigate()
 
@@ -72,11 +75,111 @@ export default function Today() {
         .gte('completed_at', todayStart)
       setCompletedTodosCount(count || 0)
 
+      // Fetch today's completed pomodoro sessions (focus only)
+      const { data: pomoData, error: pomoErr } = await supabase
+        .from('pomodoro_logs')
+        .select('id')
+        .gte('completed_at', `${todayStr}T00:00:00Z`)
+        .lte('completed_at', `${todayStr}T23:59:59Z`)
+      if (pomoErr) console.error('Pomodoro fetch error:', pomoErr)
+      setPomodoroSessions(pomoData?.length || 0)
+      console.log('[Today] Pomodoro sessions today:', pomoData?.length)
+
       const { data: hData } = await supabase.from('habits').select('*')
       setHabits(hData || [])
 
       const { data: hlData } = await supabase.from('habit_logs').select('*').eq('completed_at', todayStr)
       setHabitLogs(hlData || [])
+
+      // ── Global core streak calculation ──
+      const coreHabits = (hData || []).filter(h => h.is_core)
+      if (coreHabits.length > 0) {
+        const ninetyDaysAgo = new Date()
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+        const sinceStr = ninetyDaysAgo.toISOString().split('T')[0]
+        const coreIds = coreHabits.map(h => h.id)
+
+        const { data: streakLogs } = await supabase
+          .from('habit_logs')
+          .select('habit_id, completed_at, count')
+          .in('habit_id', coreIds)
+          .gte('completed_at', sinceStr)
+
+        // For each date, check if ALL core habits scheduled that day were completed
+        const today = new Date(todayStr + 'T00:00:00')
+        let streak = 0
+        let brokeYesterday = false
+        let prevStreakBeforeBreak = 0
+
+        for (let i = 0; i < 90; i++) {
+          const checkDate = new Date(today)
+          checkDate.setDate(today.getDate() - i)
+          const checkStr = checkDate.toISOString().split('T')[0]
+          const checkDow = checkDate.getDay()
+
+          // Core habits scheduled for this day
+          const scheduled = coreHabits.filter(h => {
+            if (!h.days_of_week) return true
+            if (Array.isArray(h.days_of_week) && h.days_of_week.length === 0) return true
+            return h.days_of_week.includes(checkDow)
+          })
+
+          if (scheduled.length === 0) {
+            // No core habits scheduled = free day, streak continues
+            streak++
+            continue
+          }
+
+          // Check if ALL scheduled core habits have a log with count >= target
+          const allDone = scheduled.every(h => {
+            const log = (streakLogs || []).find(l => l.habit_id === h.id && l.completed_at === checkStr)
+            if (!log) return false
+            const target = h.is_counter ? (h.target_count || 1) : 1
+            return log.count >= target
+          })
+
+          if (allDone) {
+            streak++
+          } else {
+            // Today (i=0): not yet completed, streak still active until midnight
+            if (i === 0) {
+              continue
+            }
+            // Yesterday (i=1): broke streak
+            if (i === 1 && streak === 0) {
+              brokeYesterday = true
+              // Count what the streak WAS before the break
+              for (let j = 2; j < 90; j++) {
+                const prevDate = new Date(today)
+                prevDate.setDate(today.getDate() - j)
+                const prevStr = prevDate.toISOString().split('T')[0]
+                const prevDow = prevDate.getDay()
+                const prevSched = coreHabits.filter(h => {
+                  if (!h.days_of_week) return true
+                  if (Array.isArray(h.days_of_week) && h.days_of_week.length === 0) return true
+                  return h.days_of_week.includes(prevDow)
+                })
+                if (prevSched.length === 0) { prevStreakBeforeBreak++; continue }
+                const prevAllDone = prevSched.every(h => {
+                  const log = (streakLogs || []).find(l => l.habit_id === h.id && l.completed_at === prevStr)
+                  if (!log) return false
+                  const target = h.is_counter ? (h.target_count || 1) : 1
+                  return log.count >= target
+                })
+                if (prevAllDone) prevStreakBeforeBreak++
+                else break
+              }
+            }
+            break
+          }
+        }
+
+        setCoreStreak(streak)
+        setCoreStreakRecovery(brokeYesterday && prevStreakBeforeBreak >= 2)
+      } else {
+        setCoreStreak(0)
+        setCoreStreakRecovery(false)
+      }
 
       const activeChallengeHabits = (hData || []).filter(h => h.challenge_active)
       let allChallengeLogs = []
@@ -311,6 +414,7 @@ export default function Today() {
           setChallengeLogs(prev => [...prev.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), data[0]])
         }
         if (willCompleteCounter) {
+          if (navigator.vibrate) navigator.vibrate(50)
           const completedChallenge = checkChallenge()
           setCelebratingIds(prev => new Set([...prev, habit.id]))
           setTimeout(() => setCelebratingIds(prev => { const n = new Set(prev); n.delete(habit.id); return n }), 700)
@@ -324,6 +428,7 @@ export default function Today() {
       }
 
       if (willComplete) {
+        if (navigator.vibrate) navigator.vibrate(50)
         const completedChallenge = checkChallenge()
         setCelebratingIds(prev => new Set([...prev, habit.id]))
         setTimeout(() => setCelebratingIds(prev => { const n = new Set(prev); n.delete(habit.id); return n }), 700)
@@ -360,7 +465,7 @@ export default function Today() {
   const displayPct = coreComplete ? 100 + barExtrasPct : barCorePct
   const isLegendary = displayPct >= 200
 
-  const totalProductivity = coreCompleted + extrasCompleted + completedTodosCount
+  const totalProductivity = coreCompleted + extrasCompleted + completedTodosCount + pomodoroSessions
 
   // Celebrations
   useEffect(() => {
@@ -495,6 +600,18 @@ export default function Today() {
               <div className="prod-phrase">"{getDailyMessage(totalProductivity)}"</div>
             </div>
           </div>
+
+          {/* Global core streak */}
+          {coreStreak >= 2 && (
+            <div style={{ textAlign: 'center', padding: '6px 0 2px', fontSize: 13, color: coreStreak % 7 === 0 ? '#c9963a' : '#a1a1aa' }}>
+              🔥 {coreStreak} días seguidos completando lo esencial
+            </div>
+          )}
+          {coreStreak < 2 && coreStreakRecovery && (
+            <div style={{ textAlign: 'center', padding: '6px 0 2px', fontSize: 13, color: '#52525b' }}>
+              Vuelve hoy. Una racha empieza con un día.
+            </div>
+          )}
 
           {/* Focus Card — ALWAYS VISIBLE */}
           <div style={{ marginBottom: 24 }}>

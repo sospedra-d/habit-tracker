@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import NightReflectionModal from '../components/NightReflectionModal'
 
 const FocusIcon = () => (
   <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -108,6 +109,7 @@ export default function DashboardLayout() {
 
   return (
     <div className="screen-container" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+      <NightReflectionModal />
       <main className="screen-content">
         <div
           key={location.pathname}

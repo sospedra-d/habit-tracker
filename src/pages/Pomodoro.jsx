@@ -12,6 +12,7 @@ export default function Pomodoro() {
 
   const [todayCompletedMinutes, setTodayCompletedMinutes] = useState(0)
   const [todaySessions, setTodaySessions] = useState(0)
+  const [dayStreak, setDayStreak] = useState(0)
 
   const timerRef = useRef(null)
 
@@ -38,6 +39,44 @@ export default function Pomodoro() {
         setTodaySessions(0)
         setTodayCompletedMinutes(0)
       }
+
+      // Calculate day streak — consecutive days with at least 1 session
+      const { data: allLogs, error: allErr } = await supabase
+        .from('pomodoro_logs')
+        .select('completed_at')
+        .eq('user_id', user.id)
+        .order('completed_at', { ascending: false })
+        .limit(365) // last year max
+
+      if (allErr || !allLogs || allLogs.length === 0) {
+        setDayStreak(0)
+        return
+      }
+
+      // Get unique dates
+      const uniqueDates = [...new Set(
+        allLogs.map(l => new Date(l.completed_at).toISOString().split('T')[0])
+      )].sort((a, b) => b.localeCompare(a)) // newest first
+
+      // Count consecutive days starting from today or yesterday
+      let streak = 0
+      const today = new Date(todayStr + 'T00:00:00')
+
+      for (let i = 0; i < 365; i++) {
+        const checkDate = new Date(today)
+        checkDate.setDate(today.getDate() - i)
+        const checkStr = checkDate.toISOString().split('T')[0]
+
+        if (uniqueDates.includes(checkStr)) {
+          streak++
+        } else {
+          // Allow skipping today if no sessions yet (streak counts from yesterday)
+          if (i === 0) continue
+          break
+        }
+      }
+
+      setDayStreak(streak)
     } catch (err) {
       console.error("Error fetching pomodoro logs", err)
     }
@@ -116,6 +155,10 @@ export default function Pomodoro() {
   const progressPercent = ((progressTotal - timeLeft) / progressTotal) * 100
   const activeColor = mode === 'focus' ? 'var(--red)' : 'var(--blue)'
 
+  // Circle dimensions
+  const circleSize = 260
+  const circleR = (circleSize / 2) - 4 // radius with padding for stroke
+
   return (
     <div className="animate-fade-in-up" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 16 }}>
 
@@ -144,30 +187,30 @@ export default function Pomodoro() {
         >Descanso</button>
       </div>
 
-      {/* Timer Circle */}
+      {/* Timer Circle — 260px */}
       <div style={{
-        position: 'relative', width: 220, height: 220, borderRadius: '50%',
+        position: 'relative', width: circleSize, height: circleSize, borderRadius: '50%',
         border: '2px solid var(--surface3)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         marginBottom: 32
       }}>
         {/* SVG Progress Ring */}
         <svg style={{ position: 'absolute', width: '100%', height: '100%', transform: 'rotate(-90deg)', pointerEvents: 'none' }}>
-          <circle cx="110" cy="110" r="106" fill="transparent" stroke="rgba(255,255,255,0.04)" strokeWidth="4" />
+          <circle cx={circleSize/2} cy={circleSize/2} r={circleR} fill="transparent" stroke="rgba(255,255,255,0.04)" strokeWidth="4" />
           <circle
-            cx="110" cy="110" r="106" fill="transparent"
+            cx={circleSize/2} cy={circleSize/2} r={circleR} fill="transparent"
             stroke={activeColor}
             strokeWidth="6" strokeLinecap="round"
-            strokeDasharray={2 * Math.PI * 106}
-            strokeDashoffset={2 * Math.PI * 106 * (1 - progressPercent / 100)}
+            strokeDasharray={2 * Math.PI * circleR}
+            strokeDashoffset={2 * Math.PI * circleR * (1 - progressPercent / 100)}
             style={{ transition: 'stroke-dashoffset 1s linear' }}
           />
         </svg>
 
-        <span style={{ fontSize: 48, fontWeight: 700, letterSpacing: '-0.05em', color: 'var(--text1)', lineHeight: 1, position: 'relative' }}>
+        <span style={{ fontSize: 56, fontWeight: 700, letterSpacing: '-0.05em', color: 'var(--text1)', lineHeight: 1, position: 'relative' }}>
           {fmtDisplay(timeLeft)}
         </span>
-        <span style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--text2)', textTransform: 'uppercase', marginTop: 4, position: 'relative' }}>
+        <span style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--text2)', textTransform: 'uppercase', marginTop: 6, position: 'relative' }}>
           {mode === 'focus' ? 'Tiempo de trabajo' : 'Tiempo de descanso'}
         </span>
       </div>
@@ -212,15 +255,30 @@ export default function Pomodoro() {
         </button>
       </div>
 
-      {/* Stats Grid — 2 columns */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, width: '100%' }}>
-        <div className="pomo-stat">
-          <div className="pomo-stat-label">Sesiones hoy</div>
-          <div className="pomo-stat-val">{todaySessions}</div>
+      {/* Stats Grid — 3 columns */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, width: '100%' }}>
+        <div style={{
+          background: '#111113', border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 14, padding: '14px 10px', textAlign: 'center'
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500, letterSpacing: '0.03em', marginBottom: 6 }}>Sesiones</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text1)' }}>{todaySessions}</div>
         </div>
-        <div className="pomo-stat">
-          <div className="pomo-stat-label">Minutos enfocado</div>
-          <div className="pomo-stat-val">{todayCompletedMinutes}</div>
+        <div style={{
+          background: '#111113', border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 14, padding: '14px 10px', textAlign: 'center'
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500, letterSpacing: '0.03em', marginBottom: 6 }}>Minutos</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text1)' }}>{todayCompletedMinutes}</div>
+        </div>
+        <div style={{
+          background: '#111113', border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 14, padding: '14px 10px', textAlign: 'center'
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500, letterSpacing: '0.03em', marginBottom: 6 }}>Racha</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: dayStreak > 0 ? 'var(--gold)' : 'var(--text1)' }}>
+            {dayStreak}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text3)', marginLeft: 2 }}>d</span>
+          </div>
         </div>
       </div>
     </div>
