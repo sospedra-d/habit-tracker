@@ -314,12 +314,18 @@ export default function Todos() {
                       style={{
                         position: 'absolute', top: 10, right: 0,
                         background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'rgba(220,32,32,0.6)', fontSize: 16, padding: 4,
-                        lineHeight: 1
+                        color: 'rgba(220,32,32,0.6)', padding: 4,
+                        lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'
                       }}
                       title="Eliminar"
                     >
-                      🗑
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                        <rect x="5" y="6" width="14" height="15" rx="2" />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
                     </button>
                   )}
                 </div>
