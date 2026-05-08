@@ -121,12 +121,15 @@ function MilestoneModal({ open, onClose, onSave }) {
 }
 
 // ─── Goal Detail View ───
-function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete }) {
+function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete, onGoalUpdate }) {
   const [msModal, setMsModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [poppingId, setPoppingId] = useState(null)
   const [bouncingId, setBouncingId] = useState(null)
   const [btnVisible, setBtnVisible] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [nameValue, setNameValue] = useState(goal.name)
+  const [savingName, setSavingName] = useState(false)
   const progress = calcProgress(milestones)
   const completedCount = milestones.filter(m => m.is_completed).length
   const allDone = milestones.length > 0 && progress === 100
@@ -173,6 +176,25 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete }) {
     onBack()
   }
 
+  const saveNameEdit = async () => {
+    const trimmed = nameValue.trim()
+    if (!trimmed || trimmed === goal.name) {
+      setEditingName(false)
+      setNameValue(goal.name)
+      return
+    }
+    setSavingName(true)
+    const { error } = await supabase.from('goals').update({ name: trimmed }).eq('id', goal.id)
+    if (!error && onGoalUpdate) onGoalUpdate({ ...goal, name: trimmed })
+    setSavingName(false)
+    setEditingName(false)
+  }
+
+  const handleNameKeyDown = (e) => {
+    if (e.key === 'Enter') saveNameEdit()
+    if (e.key === 'Escape') { setEditingName(false); setNameValue(goal.name) }
+  }
+
   return (
     <div className="anim-goal-detail">
       <button onClick={onBack} style={{ background:'none', border:'none', color:'var(--text2)', cursor:'pointer', fontSize:13, marginBottom:16, padding:0, display:'flex', alignItems:'center', gap:4 }}>
@@ -180,7 +202,51 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete }) {
       </button>
 
       <div style={{ marginBottom:20 }}>
-        <h2 style={{ fontSize:20, fontWeight:700, color:'var(--text1)', marginBottom:8 }}>{goal.name}</h2>
+        {/* Editable name */}
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+          {editingName ? (
+            <>
+              <input
+                value={nameValue}
+                onChange={e => setNameValue(e.target.value)}
+                onKeyDown={handleNameKeyDown}
+                autoFocus
+                style={{
+                  fontSize:20, fontWeight:700, color:'var(--text1)', background:'var(--surface2)',
+                  border:'1px solid var(--border2)', borderRadius:10, padding:'6px 12px',
+                  outline:'none', flex:1
+                }}
+              />
+              <button
+                onClick={saveNameEdit}
+                disabled={savingName}
+                style={{
+                  background:'none', border:'none', cursor:'pointer', fontSize:18,
+                  color:'#22c55e', padding:4, opacity: savingName ? 0.5 : 1
+                }}
+              >✓</button>
+              <button
+                onClick={() => { setEditingName(false); setNameValue(goal.name) }}
+                style={{ background:'none', border:'none', cursor:'pointer', fontSize:14, color:'var(--text3)', padding:4 }}
+              >✕</button>
+            </>
+          ) : (
+            <>
+              <h2 style={{ fontSize:20, fontWeight:700, color:'var(--text1)', margin:0 }}>{goal.name}</h2>
+              <button
+                onClick={() => { setEditingName(true); setNameValue(goal.name) }}
+                style={{
+                  background:'none', border:'none', cursor:'pointer', fontSize:14,
+                  color:'var(--text3)', padding:4, opacity:0.5, transition:'opacity 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                onMouseLeave={e => e.currentTarget.style.opacity = 0.5}
+                title="Editar nombre"
+              >✎</button>
+            </>
+          )}
+        </div>
+
         <div style={{ width:'100%', height:6, background:'var(--border)', borderRadius:3, marginBottom:6 }}>
           <div style={{ width:`${progress}%`, height:'100%', background:goal.color, borderRadius:3, transition:'width 0.4s ease-out' }} />
         </div>
@@ -266,8 +332,12 @@ function LegacySection() {
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); return }
-      const { data } = await supabase.from('achievements').select('*').eq('user_id', user.id).order('achieved_at', { ascending: false })
+      if (!user) { console.log('[Legacy] No user found'); setLoading(false); return }
+      console.log('[Legacy] Fetching achievements for user:', user.id)
+      const { data, error } = await supabase.from('achievements').select('*').eq('user_id', user.id).order('achieved_at', { ascending: false })
+      if (error) console.error('[Legacy] Error fetching achievements:', error)
+      console.log('[Legacy] All achievements:', data)
+      console.log('[Legacy] habit_challenge entries:', (data || []).filter(a => a.type === 'habit_challenge'))
       setAchievements(data || [])
       setLoading(false)
     })()
@@ -490,7 +560,7 @@ export default function Goals() {
     const gMs = milestonesMap[selectedGoal.id] || []
     return (
       <div>
-        <GoalDetail goal={selectedGoal} milestones={gMs} onBack={() => { setSelectedGoal(null); fetchData() }} onRefresh={refreshDetail} onComplete={handleManualComplete} />
+        <GoalDetail goal={selectedGoal} milestones={gMs} onBack={() => { setSelectedGoal(null); fetchData() }} onRefresh={refreshDetail} onComplete={handleManualComplete} onGoalUpdate={(updated) => setSelectedGoal(updated)} />
       </div>
     )
   }

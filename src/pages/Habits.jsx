@@ -3,19 +3,6 @@ import { supabase } from '../supabaseClient'
 import HabitFormModal, { DAY_LABELS, CATEGORY_COLORS } from '../components/HabitFormModal'
 import { getChallengeStatus } from '../utils/challenge'
 
-const COLLAPSE_KEY = 'habit_category_collapse'
-
-function getCollapseState() {
-  try {
-    const raw = localStorage.getItem(COLLAPSE_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
-}
-
-function saveCollapseState(state) {
-  localStorage.setItem(COLLAPSE_KEY, JSON.stringify(state))
-}
-
 export default function Habits() {
   const [habits, setHabits] = useState([])
   const [logsMap, setLogsMap] = useState(new Map())
@@ -27,8 +14,7 @@ export default function Habits() {
   const [deletingId, setDeletingId] = useState(null)
   const [showAllHabits, setShowAllHabits] = useState(false)
   const [shiftFilter, setShiftFilter] = useState(false)
-  // MEJORA 1: collapsible categories
-  const [collapsed, setCollapsed] = useState(getCollapseState)
+  const [selectedCategory, setSelectedCategory] = useState(null)
 
   const today = new Date()
   const todayDayIndex = today.getDay()
@@ -38,14 +24,6 @@ export default function Habits() {
 
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
   const todayLabel = dayNames[todayDayIndex]
-
-  const toggleCollapse = (cat) => {
-    setCollapsed(prev => {
-      const next = { ...prev, [cat]: !prev[cat] }
-      saveCollapseState(next)
-      return next
-    })
-  }
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -144,8 +122,8 @@ export default function Habits() {
 
   const displayedHabits = filteredHabits
 
-  // Group by category, sort: categories with Núcleo first, within each category Núcleo before Extra
-  const sortedGroups = useMemo(() => {
+  // Category grid data
+  const categoryCards = useMemo(() => {
     const groups = {}
     displayedHabits.forEach(h => {
       const cat = h.category || 'Otro'
@@ -153,25 +131,22 @@ export default function Habits() {
       groups[cat].push(h)
     })
 
-    Object.keys(groups).forEach(cat => {
-      groups[cat].sort((a, b) => {
-        if (a.is_core && !b.is_core) return -1
-        if (!a.is_core && b.is_core) return 1
-        return 0
-      })
-    })
-
-    const entries = Object.entries(groups)
-    entries.sort((a, b) => {
-      const aHasCore = a[1].some(h => h.is_core)
-      const bHasCore = b[1].some(h => h.is_core)
-      if (aHasCore && !bHasCore) return -1
-      if (!aHasCore && bHasCore) return 1
+    return Object.entries(groups).map(([name, catHabits]) => {
+      const hasCore = catHabits.some(h => h.is_core)
+      const total = catHabits.length
+      const completed = catHabits.filter(h => {
+        const log = logsMap.get(h.id)
+        if (!log) return false
+        return h.is_counter ? log.count >= (h.target_count || 1) : log.count >= 1
+      }).length
+      return { name, habits: catHabits, hasCore, total, completed }
+    }).sort((a, b) => {
+      // Core categories first
+      if (a.hasCore && !b.hasCore) return -1
+      if (!a.hasCore && b.hasCore) return 1
       return 0
     })
-
-    return entries
-  }, [displayedHabits])
+  }, [displayedHabits, logsMap])
 
   const handleSave = async (habitData) => {
     try {
@@ -276,6 +251,21 @@ export default function Habits() {
 
   const turnoLabel = { 'mañana': '☀️', 'noche': '🌙', 'todo': '' }
 
+  // --- Category detail view ---
+  const selectedCatData = selectedCategory
+    ? categoryCards.find(c => c.name === selectedCategory)
+    : null
+
+  const selectedCatHabits = useMemo(() => {
+    if (!selectedCatData) return []
+    // Sort: Núcleo first, then Extra
+    return [...selectedCatData.habits].sort((a, b) => {
+      if (a.is_core && !b.is_core) return -1
+      if (!a.is_core && b.is_core) return 1
+      return 0
+    })
+  }, [selectedCatData])
+
   return (
     <div className="animate-fade-in-up">
       {/* Header */}
@@ -303,13 +293,13 @@ export default function Habits() {
       <div className="task-tabs" style={{ marginBottom: 20 }}>
         <button
           className={`task-tab ${!showAllHabits ? 'active' : ''}`}
-          onClick={() => setShowAllHabits(false)}
+          onClick={() => { setShowAllHabits(false); setSelectedCategory(null) }}
         >
           Hoy ({todaysHabits.length})
         </button>
         <button
           className={`task-tab ${showAllHabits ? 'active' : ''}`}
-          onClick={() => setShowAllHabits(true)}
+          onClick={() => { setShowAllHabits(true); setSelectedCategory(null) }}
         >
           Todos ({habits.length})
         </button>
@@ -332,140 +322,180 @@ export default function Habits() {
         </div>
       )}
 
-      {/* Grouped Habit List — sorted by category, collapsible */}
-      {!loading && displayedHabits.length > 0 && (
-        <div className="habit-list">
-          {sortedGroups.map(([categoryName, catHabits]) => {
-            const hasCoreHabits = catHabits.some(h => h.is_core)
-            const dotColor = hasCoreHabits ? 'var(--red)' : 'var(--blue)'
-            const isCollapsed = collapsed[categoryName] || false
+      {/* Category Detail View */}
+      {!loading && selectedCategory && selectedCatData && (
+        <div className="anim-tab-slide">
+          <button
+            onClick={() => setSelectedCategory(null)}
+            style={{
+              background: 'none', border: 'none', color: 'var(--text2)', cursor: 'pointer',
+              fontSize: 13, marginBottom: 16, padding: 0, display: 'flex', alignItems: 'center', gap: 4
+            }}
+          >
+            ← Volver
+          </button>
 
-            return (
-              <div key={categoryName}>
-                {/* Category label — MEJORA 1: clickable with chevron */}
+          <div className="habit-list">
+            <div className="habit-group-label">
+              <div className="habit-group-dot" style={{ background: selectedCatData.hasCore ? 'var(--red)' : 'var(--blue)' }} />
+              <span style={{ flex: 1 }}>{selectedCategory.toUpperCase()}</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>{selectedCatData.completed}/{selectedCatData.total}</span>
+            </div>
+
+            {selectedCatHabits.map(habit => {
+              const { currentCount, target, progress } = getHabitProgress(habit)
+              const isCompleted = progress >= 1
+              const isForToday = habit.days_of_week?.includes(todayDayIndex)
+              const isToggling = togglingId === habit.id
+
+              const checkClass = isCompleted
+                ? habit.is_core ? 'habit-check done' : 'habit-check done-blue'
+                : 'habit-check'
+
+              const completedStyle = isCompleted ? { opacity: 0.5 } : {}
+              const status = getChallengeStatus(habit, challengeLogs, todayStr)
+
+              return (
                 <div
-                  className="habit-group-label"
-                  onClick={() => toggleCollapse(categoryName)}
-                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                  key={habit.id}
+                  className="habit-row"
+                  style={{ opacity: deletingId === habit.id ? 0.4 : 1, ...completedStyle }}
                 >
-                  <div className="habit-group-dot" style={{ background: dotColor }} />
-                  <span style={{ flex: 1 }}>{categoryName.toUpperCase()}</span>
-                  <span style={{
-                    fontSize: 12, color: 'var(--text3)', transition: 'transform 0.2s',
-                    transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                    display: 'inline-block'
-                  }}>
-                    ▾
-                  </span>
-                </div>
-
-                {/* Habit rows — collapsible with transition */}
-                <div style={{
-                  overflow: 'hidden',
-                  maxHeight: isCollapsed ? 0 : 2000,
-                  opacity: isCollapsed ? 0 : 1,
-                  transition: 'max-height 0.2s ease, opacity 0.2s ease'
-                }}>
-                  {catHabits.map(habit => {
-                    const { currentCount, target, progress } = getHabitProgress(habit)
-                    const isCompleted = progress >= 1
-                    const isForToday = habit.days_of_week?.includes(todayDayIndex)
-                    const isToggling = togglingId === habit.id
-
-                    const checkClass = isCompleted
-                      ? habit.is_core ? 'habit-check done' : 'habit-check done-blue'
-                      : 'habit-check'
-
-                    // MEJORA 2: completed habits show differently
-                    const completedStyle = isCompleted ? { opacity: 0.5 } : {}
-                    const status = getChallengeStatus(habit, challengeLogs, todayStr)
-
-                    return (
-                      <div
-                        key={habit.id}
-                        className="habit-row"
-                        style={{ opacity: deletingId === habit.id ? 0.4 : 1, ...completedStyle }}
-                      >
-                        {/* Circular checkbox */}
-                        {isForToday ? (
-                          habit.is_counter ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <div
-                                className={checkClass}
-                                onClick={() => {
-                                  if (!isToggling) updateLog(habit, isCompleted ? 0 : currentCount + 1)
-                                }}
-                              >
-                                {isCompleted && <span style={{ fontSize: 10, color: 'white' }}>✓</span>}
-                              </div>
-                              <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500 }}>
-                                {currentCount}/{target}
-                              </span>
-                            </div>
-                          ) : (
-                            <div
-                              className={checkClass}
-                              onClick={() => {
-                                if (!isToggling) updateLog(habit, isCompleted ? 0 : 1)
-                              }}
-                            >
-                              {isCompleted && <span style={{ fontSize: 10, color: 'white' }}>✓</span>}
-                            </div>
-                          )
-                        ) : (
-                          <div className="habit-check" style={{ opacity: 0.3, cursor: 'default' }} />
-                        )}
-
-                        {/* Name + challenge UI */}
-                        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 2 }}>
-                          <span className={`habit-name ${isCompleted ? 'completed' : ''}`}
-                            style={isCompleted ? { color: '#71717a', textDecoration: 'line-through', flex: 'none' } : { flex: 'none' }}
-                          >
-                            {habit.name}
-                            {status.showRedX && (
-                              <span style={{ color: '#dc2020', marginLeft: 6, fontWeight: 'bold', fontSize: 15 }} title="Racha rota — completa hoy para reiniciar">✕</span>
-                            )}
-                            {(habit.challenge_active && status.isActive && !status.showRedX) && (
-                              <span style={{ marginLeft: 6, fontSize: 13 }} title="Reto activo">🏅</span>
-                            )}
-                            {habit.turno && habit.turno !== 'todo' && (
-                              <span style={{ marginLeft: 6, fontSize: 12 }}>{turnoLabel[habit.turno]}</span>
-                            )}
-                          </span>
-
-                          {/* Barra de progreso dorada — solo en ESTADO NORMAL (sin X) */}
-                          {(habit.challenge_active && status.isActive && !status.showRedX) && (
-                            <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                              <div style={{ width: '100%', height: 3, background: 'var(--border)', borderRadius: 2 }}>
-                                <div style={{ width: `${Math.min((status.streak / habit.challenge_days) * 100, 100)}%`, height: '100%', background: '#c9963a', borderRadius: 2, transition: 'width 0.3s' }} />
-                              </div>
-                              <div style={{ fontSize: 11, color: '#a1a1aa' }}>Racha: {Math.min(status.streak, habit.challenge_days)} / {habit.challenge_days} días</div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Edit button */}
-                        <button
-                          onClick={() => openEdit(habit)}
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-                            color: 'var(--text3)', fontSize: 14, lineHeight: 1, flexShrink: 0,
-                            opacity: 0.5, transition: 'opacity 0.2s'
+                  {/* Circular checkbox */}
+                  {isForToday ? (
+                    habit.is_counter ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div
+                          className={checkClass}
+                          onClick={() => {
+                            if (!isToggling) updateLog(habit, isCompleted ? 0 : currentCount + 1)
                           }}
-                          onMouseEnter={e => e.currentTarget.style.opacity = 1}
-                          onMouseLeave={e => e.currentTarget.style.opacity = 0.5}
-                          title="Editar"
                         >
-                          ✎
-                        </button>
-
-                        {/* Badge */}
-                        <span className={`habit-badge ${habit.is_core ? 'badge-nucleo' : 'badge-extra'}`}>
-                          {habit.is_core ? 'Núcleo' : 'Extra'}
+                          {isCompleted && <span style={{ fontSize: 10, color: 'white' }}>✓</span>}
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 500 }}>
+                          {currentCount}/{target}
                         </span>
                       </div>
+                    ) : (
+                      <div
+                        className={checkClass}
+                        onClick={() => {
+                          if (!isToggling) updateLog(habit, isCompleted ? 0 : 1)
+                        }}
+                      >
+                        {isCompleted && <span style={{ fontSize: 10, color: 'white' }}>✓</span>}
+                      </div>
                     )
-                  })}
+                  ) : (
+                    <div className="habit-check" style={{ opacity: 0.3, cursor: 'default' }} />
+                  )}
+
+                  {/* Name + challenge UI */}
+                  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 2 }}>
+                    <span className={`habit-name ${isCompleted ? 'completed' : ''}`}
+                      style={isCompleted ? { color: '#71717a', textDecoration: 'line-through', flex: 'none' } : { flex: 'none' }}
+                    >
+                      {habit.name}
+                      {status.showRedX && (
+                        <span style={{ color: '#dc2020', marginLeft: 6, fontWeight: 'bold', fontSize: 15 }} title="Racha rota — completa hoy para reiniciar">✕</span>
+                      )}
+                      {(habit.challenge_active && status.isActive && !status.showRedX) && (
+                        <span style={{ marginLeft: 6, fontSize: 13 }} title="Reto activo">🏅</span>
+                      )}
+                      {habit.turno && habit.turno !== 'todo' && (
+                        <span style={{ marginLeft: 6, fontSize: 12 }}>{turnoLabel[habit.turno]}</span>
+                      )}
+                    </span>
+
+                    {/* Barra de progreso dorada — solo en ESTADO NORMAL (sin X) */}
+                    {(habit.challenge_active && status.isActive && !status.showRedX) && (
+                      <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div style={{ width: '100%', height: 3, background: 'var(--border)', borderRadius: 2 }}>
+                          <div style={{ width: `${Math.min((status.streak / habit.challenge_days) * 100, 100)}%`, height: '100%', background: '#c9963a', borderRadius: 2, transition: 'width 0.3s' }} />
+                        </div>
+                        <div style={{ fontSize: 11, color: '#a1a1aa' }}>Racha: {Math.min(status.streak, habit.challenge_days)} / {habit.challenge_days} días</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Edit button */}
+                  <button
+                    onClick={() => openEdit(habit)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                      color: 'var(--text3)', fontSize: 14, lineHeight: 1, flexShrink: 0,
+                      opacity: 0.5, transition: 'opacity 0.2s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                    onMouseLeave={e => e.currentTarget.style.opacity = 0.5}
+                    title="Editar"
+                  >
+                    ✎
+                  </button>
+
+                  {/* Badge */}
+                  <span className={`habit-badge ${habit.is_core ? 'badge-nucleo' : 'badge-extra'}`}>
+                    {habit.is_core ? 'Núcleo' : 'Extra'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Category Grid View */}
+      {!loading && displayedHabits.length > 0 && !selectedCategory && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 12,
+          paddingBottom: 80
+        }}>
+          {categoryCards.map(card => {
+            const pct = card.total > 0 ? Math.round((card.completed / card.total) * 100) : 0
+            const barColor = card.hasCore ? 'var(--red)' : 'var(--blue)'
+            const allDone = card.completed === card.total && card.total > 0
+
+            return (
+              <div
+                key={card.name}
+                onClick={() => setSelectedCategory(card.name)}
+                style={{
+                  background: '#111113',
+                  border: `1px solid ${allDone ? 'rgba(201,150,58,0.25)' : 'rgba(255,255,255,0.07)'}`,
+                  borderRadius: 16,
+                  padding: '20px 16px 14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}
+              >
+                {/* Category name */}
+                <div style={{
+                  fontSize: 11, fontWeight: 700, color: 'var(--text3)',
+                  letterSpacing: 1, textTransform: 'uppercase'
+                }}>
+                  {card.name}
+                </div>
+
+                {/* Progress count */}
+                <div style={{ fontSize: 28, fontWeight: 700, color: allDone ? '#c9963a' : 'var(--text1)', lineHeight: 1 }}>
+                  {card.completed}<span style={{ fontSize: 16, color: 'var(--text3)', fontWeight: 400 }}>/{card.total}</span>
+                </div>
+
+                {/* Progress bar */}
+                <div style={{ width: '100%', height: 3, background: 'var(--border)', borderRadius: 2, marginTop: 'auto' }}>
+                  <div style={{
+                    width: `${pct}%`, height: '100%',
+                    background: allDone ? '#c9963a' : barColor,
+                    borderRadius: 2, transition: 'width 0.4s ease-out'
+                  }} />
                 </div>
               </div>
             )
