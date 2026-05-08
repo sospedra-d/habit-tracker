@@ -34,6 +34,7 @@ export default function Today() {
   const [celebratingIds, setCelebratingIds] = useState(new Set())
   const [completingChallengeIds, setCompletingChallengeIds] = useState(new Set())
   const [allCoreCelebration, setAllCoreCelebration] = useState(false)
+  const [coreBarFlash, setCoreBarFlash] = useState(false)
   const [legendaryCelebration, setLegendaryCelebration] = useState(false)
   const [energySelector, setEnergySelector] = useState(null)
   const [focusIndex, setFocusIndex] = useState(0)
@@ -366,6 +367,11 @@ export default function Today() {
     if (coreComplete && !prevCoreCompleteRef.current && coreTotal > 0) {
       setAllCoreCelebration(true)
       setTimeout(() => setAllCoreCelebration(false), 1500)
+      // Haptic feedback
+      if (navigator.vibrate) navigator.vibrate(200)
+      // Overdrive bar flash: white 150ms → fade back 300ms
+      setCoreBarFlash(true)
+      setTimeout(() => setCoreBarFlash(false), 150)
     }
     prevCoreCompleteRef.current = coreComplete
   }, [coreComplete, coreTotal])
@@ -467,7 +473,7 @@ export default function Today() {
               </div>
               <div className="od-sub">{coreCompleted}/{coreTotal} Núcleo · {extrasCompleted}/{extrasTotal} Extra</div>
               <div className="od-bar-track">
-                <div className="od-bar-fill" style={{ width: `${barCorePct}%`, background: 'var(--red)' }} />
+                <div className="od-bar-fill" style={{ width: `${barCorePct}%`, background: coreBarFlash ? '#ffffff' : 'var(--red)', transition: coreBarFlash ? 'background 0s' : 'background 0.3s ease, width 0.4s ease-out' }} />
                 {coreComplete && barExtrasPct > 0 && (
                   <div className="od-bar-fill" style={{
                     width: `${barExtrasPct}%`,

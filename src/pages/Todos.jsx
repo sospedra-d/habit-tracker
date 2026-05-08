@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
 import TaskFormModal from '../components/TaskFormModal'
@@ -9,90 +9,19 @@ const ENERGY_MAP = {
   low: { label: 'Baja', color: 'var(--text3)', dotClass: 'p-baja' }
 }
 
-// Swipeable task row component — iOS-style swipe-to-delete
-function SwipeableTaskRow({ todo, children, onDelete }) {
-  const touchRef = useRef({ startX: 0, startY: 0, swiping: false })
-  const [offsetX, setOffsetX] = useState(0)
-  const [transitioning, setTransitioning] = useState(false)
-
-  const onTouchStart = (e) => {
-    const touch = e.touches[0]
-    touchRef.current = { startX: touch.clientX, startY: touch.clientY, swiping: false }
-    setTransitioning(false)
-  }
-
-  const onTouchMove = (e) => {
-    const touch = e.touches[0]
-    const deltaX = touch.clientX - touchRef.current.startX
-    const deltaY = Math.abs(touch.clientY - touchRef.current.startY)
-
-    if (!touchRef.current.swiping) {
-      if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > deltaY) {
-        touchRef.current.swiping = true
-      } else if (deltaY > 10) {
-        return
-      }
-    }
-
-    if (touchRef.current.swiping && deltaX < 0) {
-      setOffsetX(Math.max(deltaX, -80))
-    }
-  }
-
-  const onTouchEnd = () => {
-    setTransitioning(true)
-    if (offsetX < -50) {
-      setOffsetX(-72)
-    } else {
-      setOffsetX(0)
-    }
-    touchRef.current.swiping = false
-  }
-
-  const handleDelete = () => {
-    if (confirm('¿Seguro que quieres eliminar esta tarea?')) {
-      onDelete(todo.id)
-    }
-    setTransitioning(true)
-    setOffsetX(0)
-  }
-
-  return (
-    <div style={{ position: 'relative', overflow: 'hidden' }}>
-      {/* Delete zone behind */}
-      <div style={{
-        position: 'absolute', top: 0, right: 0, bottom: 0, width: 72,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: '#dc2020'
-      }}>
-        <button
-          onClick={handleDelete}
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: 'white', fontSize: 18, padding: 8
-          }}
-          title="Eliminar"
-        >
-          🗑
-        </button>
-      </div>
-      {/* Swipeable content */}
-      <div
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        style={{
-          transform: `translateX(${offsetX}px)`,
-          transition: transitioning ? 'transform 0.25s ease-out' : 'none',
-          position: 'relative',
-          zIndex: 1,
-          background: 'var(--app-bg)'
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  )
+// Priority sort: high first, then medium, then low
+const PRIORITY = { high: 0, medium: 1, low: 2 }
+function sortByPriority(list) {
+  return [...list].sort((a, b) => {
+    const pA = PRIORITY[a.energy_level] ?? 3
+    const pB = PRIORITY[b.energy_level] ?? 3
+    if (pA !== pB) return pA - pB
+    // Secondary: due_date
+    if (!a.due_date && !b.due_date) return 0
+    if (!a.due_date) return 1
+    if (!b.due_date) return -1
+    return new Date(a.due_date) - new Date(b.due_date)
+  })
 }
 
 export default function Todos() {
@@ -101,22 +30,25 @@ export default function Todos() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('auto')
   const [modalOpen, setModalOpen] = useState(false)
+  const [selectedTodoId, setSelectedTodoId] = useState(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const navigate = useNavigate()
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      // BUG 1 FIX: Fetch ALL todos (pending and completed) in one go
       const { data, error } = await supabase
         .from('todos')
         .select('*')
         .order('created_at', { ascending: false })
       if (error) throw error
-      console.log('[Todos] Fetched all todos:', data?.length, data)
 
       const pending = (data || []).filter(t => !t.is_completed)
-      
-      // BUG 2 FIX: filter completed by completed_at within last 24h
+
+      // Sort pending by priority (high → medium → low)
+      pending.sort((a, b) => (PRIORITY[a.energy_level] ?? 3) - (PRIORITY[b.energy_level] ?? 3))
+
+      // Filter completed by completed_at within last 24h
       const since24h = Date.now() - 24 * 60 * 60 * 1000
       const completed = (data || []).filter(t => {
         if (!t.is_completed) return false
@@ -132,6 +64,15 @@ export default function Todos() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // Close delete icon when tapping elsewhere
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setSelectedTodoId(null)
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [])
+
   const categorizedTodos = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0]
     const today = new Date(todayStr + "T00:00:00")
@@ -140,13 +81,7 @@ export default function Todos() {
 
     const hacerAhora = [], agendado = [], bandeja = []
 
-    const sorted = [...todos].sort((a, b) => {
-      if (!a.due_date && !b.due_date) return 0
-      if (!a.due_date) return 1; if (!b.due_date) return -1
-      return new Date(a.due_date) - new Date(b.due_date)
-    })
-
-    sorted.forEach(todo => {
+    todos.forEach(todo => {
       const t = { ...todo, energy_level: todo.energy_level || 'low' }
       if (!t.due_date) bandeja.push(t)
       else {
@@ -156,7 +91,11 @@ export default function Todos() {
       }
     })
 
-    return { hacerAhora, agendado, bandeja }
+    return {
+      hacerAhora: sortByPriority(hacerAhora),
+      agendado: sortByPriority(agendado),
+      bandeja: sortByPriority(bandeja)
+    }
   }, [todos])
 
   const toggleComplete = async (todo) => {
@@ -188,6 +127,8 @@ export default function Todos() {
       if (error) throw error
       setTodos(prev => prev.filter(t => t.id !== id))
       setCompletedTodos(prev => prev.filter(t => t.id !== id))
+      setConfirmDeleteId(null)
+      setSelectedTodoId(null)
     } catch (err) { console.error(err) }
   }
 
@@ -209,29 +150,13 @@ export default function Todos() {
   }, [activeTab, categorizedTodos])
 
   const activeList = useMemo(() => {
-    let list = []
     switch (activeTabResolved) {
-      case 'criticas': list = categorizedTodos.hacerAhora; break
-      case 'agendadas': list = categorizedTodos.agendado; break
-      case 'inbox': list = categorizedTodos.bandeja; break
-      case 'completadas': list = completedTodos; break
+      case 'criticas': return categorizedTodos.hacerAhora
+      case 'agendadas': return categorizedTodos.agendado
+      case 'inbox': return categorizedTodos.bandeja
+      case 'completadas': return completedTodos
       default: return []
     }
-
-    const ENERGY_VAL = { high: 3, medium: 2, low: 1 }
-    
-    return [...list].sort((a, b) => {
-      // 1. Sort by energy high to low
-      const eA = ENERGY_VAL[a.energy_level || 'low']
-      const eB = ENERGY_VAL[b.energy_level || 'low']
-      if (eA !== eB) return eB - eA
-      
-      // 2. Sort by due_date if energy is the same
-      if (!a.due_date && !b.due_date) return 0
-      if (!a.due_date) return 1
-      if (!b.due_date) return -1
-      return new Date(a.due_date) - new Date(b.due_date)
-    })
   }, [activeTabResolved, categorizedTodos, completedTodos])
 
   // Top focus task = first pending critical task
@@ -343,35 +268,93 @@ export default function Todos() {
               )
             })
           ) : (
-            /* Pending tasks — swipe-to-delete */
+            /* Pending tasks — tap to reveal delete */
             activeList.map(todo => {
               const energy = getEnergyInfo(todo.energy_level)
+              const isSelected = selectedTodoId === todo.id
               return (
-                <SwipeableTaskRow key={todo.id} todo={todo} onDelete={handleDelete}>
-                  <div className="task-row" style={{ position: 'relative' }}>
-                    {/* Rounded checkbox */}
-                    <div
-                      className="task-sq"
-                      onClick={() => toggleComplete(todo)}
-                    >
-                    </div>
+                <div
+                  key={todo.id}
+                  className="task-row"
+                  style={{ position: 'relative' }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSelectedTodoId(isSelected ? null : todo.id)
+                  }}
+                >
+                  {/* Rounded checkbox */}
+                  <div
+                    className="task-sq"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleComplete(todo)
+                    }}
+                  >
+                  </div>
 
-                    {/* Task info */}
-                    <div className="task-info">
-                      <div className="task-name">{todo.title}</div>
-                      <div className="task-meta">
-                        <div className={`priority-dot ${energy.dotClass}`} />
-                        <span>
-                          {energy.label}
-                          {todo.due_date && ` · ${getDaysLeftText(todo.due_date)}`}
-                        </span>
-                      </div>
+                  {/* Task info */}
+                  <div className="task-info">
+                    <div className="task-name">{todo.title}</div>
+                    <div className="task-meta">
+                      <div className={`priority-dot ${energy.dotClass}`} />
+                      <span>
+                        {energy.label}
+                        {todo.due_date && ` · ${getDaysLeftText(todo.due_date)}`}
+                      </span>
                     </div>
                   </div>
-                </SwipeableTaskRow>
+
+                  {/* Delete icon — appears on tap */}
+                  {isSelected && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmDeleteId(todo.id)
+                      }}
+                      style={{
+                        position: 'absolute', top: 10, right: 0,
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'rgba(220,32,32,0.6)', fontSize: 16, padding: 4,
+                        lineHeight: 1
+                      }}
+                      title="Eliminar"
+                    >
+                      🗑
+                    </button>
+                  )}
+                </div>
               )
             })
           )}
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {confirmDeleteId && (
+        <div className="modal-overlay">
+          <div className="modal-backdrop" onClick={() => setConfirmDeleteId(null)} />
+          <div className="modal-content animate-fade-in-up" style={{ maxWidth: 320, textAlign: 'center' }}>
+            <div style={{ fontSize: 14, color: 'var(--text1)', marginBottom: 20, fontWeight: 500 }}>
+              ¿Eliminar tarea?
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                style={{
+                  flex: 1, padding: 12, borderRadius: 12, fontSize: 14, fontWeight: 500,
+                  background: 'var(--surface2)', border: '1px solid var(--border)',
+                  color: 'var(--text2)', cursor: 'pointer'
+                }}
+              >Cancelar</button>
+              <button
+                onClick={() => handleDelete(confirmDeleteId)}
+                style={{
+                  flex: 1, padding: 12, borderRadius: 12, fontSize: 14, fontWeight: 600,
+                  background: '#dc2020', border: 'none', color: 'white', cursor: 'pointer'
+                }}
+              >Eliminar</button>
+            </div>
+          </div>
         </div>
       )}
 
