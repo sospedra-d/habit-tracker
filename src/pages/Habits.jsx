@@ -13,14 +13,16 @@ export default function Habits() {
   const [togglingId, setTogglingId] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
   const [showAllHabits, setShowAllHabits] = useState(false)
-  const [shiftFilter, setShiftFilter] = useState(false)
+  const [shiftFilter, setShiftFilter] = useState(() => {
+    try { return localStorage.getItem('habit_filter_active') === 'true' } catch { return false }
+  })
   const [selectedCategory, setSelectedCategory] = useState(null)
 
   const today = new Date()
   const todayDayIndex = today.getDay()
   const todayStr = today.toISOString().split('T')[0]
   const currentHour = today.getHours()
-  const currentShift = currentHour < 12 ? 'mañana' : 'noche'
+  const currentShift = currentHour < 14 ? 'mañana' : 'noche'
 
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
   const todayLabel = dayNames[todayDayIndex]
@@ -282,7 +284,11 @@ export default function Habits() {
           </span>
           <div
             className={`sw-track ${shiftFilter ? 'on' : 'off'}`}
-            onClick={() => setShiftFilter(!shiftFilter)}
+            onClick={() => {
+              const next = !shiftFilter
+              setShiftFilter(next)
+              try { localStorage.setItem('habit_filter_active', String(next)) } catch {}
+            }}
           >
             <div className="sw-thumb" />
           </div>

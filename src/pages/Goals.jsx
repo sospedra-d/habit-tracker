@@ -605,18 +605,23 @@ export default function Goals() {
 
                 return (
                   <div key={g.id} onClick={() => !isCelebrating && setSelectedGoal(g)} style={{
-                    background:'#111113', border:'1px solid rgba(255,255,255,0.07)', borderRadius:20, padding:16, cursor: isCelebrating ? 'default' : 'pointer',
+                    background:'#111113',
+                    border:'1px solid rgba(255,255,255,0.07)',
+                    borderLeft:`3px solid ${g.color}`,
+                    borderRadius:16,
+                    padding:'14px 16px',
+                    cursor: isCelebrating ? 'default' : 'pointer',
                     transition:'all 0.3s', position:'relative', overflow:'hidden',
                     boxShadow: (isCelebrating && completionPhase === 'glow') ? `0 0 30px ${g.color}40` : 'none'
                   }}>
                     {isCelebrating && completionPhase === 'glow' && (
-                      <div style={{ position:'absolute', inset:0, background:`linear-gradient(135deg, ${g.color}20, transparent)`, animation:'pulse 0.5s ease-in-out infinite alternate', borderRadius:20 }} />
+                      <div style={{ position:'absolute', inset:0, background:`linear-gradient(135deg, ${g.color}20, transparent)`, animation:'pulse 0.5s ease-in-out infinite alternate', borderRadius:16 }} />
                     )}
-                    <div style={{ fontSize:16, fontWeight:600, color:'var(--text1)', marginBottom:10, position:'relative' }}>{g.name}</div>
-                    <div style={{ width:'100%', height:5, background:'var(--border)', borderRadius:3, marginBottom:8, position:'relative' }}>
+                    <div style={{ fontSize:15, fontWeight:600, color:'var(--text1)', marginBottom:10, position:'relative' }}>{g.name}</div>
+                    <div style={{ width:'100%', height:3, background:'var(--border)', borderRadius:2, marginBottom:8, position:'relative' }}>
                       <div style={{
                         width: (isCelebrating && completionPhase === 'bar') ? '100%' : `${progress}%`,
-                        height:'100%', background:g.color, borderRadius:3,
+                        height:'100%', background:g.color, borderRadius:2, opacity: 0.55,
                         transition: (isCelebrating && completionPhase === 'bar') ? 'width 0.4s ease-out' : 'width 0.4s'
                       }} />
                     </div>

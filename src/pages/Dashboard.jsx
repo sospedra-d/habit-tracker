@@ -58,6 +58,9 @@ export default function Dashboard({ embedded = false }) {
   const [todayHabitCount, setTodayHabitCount] = useState(0)
   const [todayTodoCount, setTodayTodoCount] = useState(0)
   const [appTimeSeconds, setAppTimeSeconds] = useState(getTodayAppTime())
+  const [heatTooltip, setHeatTooltip] = useState(null) // { text: string[], x: number, y: number }
+  const longPressTimer = useRef(null)
+  const heatmapRef = useRef(null)
 
   const last7Days = STATIC_LAST_7_DAYS
   const last90Days = STATIC_LAST_90_DAYS
@@ -225,6 +228,21 @@ export default function Dashboard({ embedded = false }) {
     return { bg: `rgba(220,32,32,${a})`, border: `1px solid rgba(220,32,32,${a * 0.5})` }
   }
 
+  const formatHeatDate = (dateStr) => {
+    const d = new Date(dateStr + 'T00:00:00')
+    return d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
+  }
+
+  const showHeatTooltip = (day, rect, containerRect) => {
+    const x = rect.left - containerRect.left + rect.width / 2
+    const y = rect.top - containerRect.top
+    setHeatTooltip({
+      dateLabel: formatHeatDate(day.date),
+      countLabel: `${day.count} hábito${day.count !== 1 ? 's' : ''} completado${day.count !== 1 ? 's' : ''}`,
+      x, y
+    })
+  }
+
   const totalCompletedThisWeek = weeklyData.reduce((acc, curr) => acc + curr.completados, 0)
 
   const appTimeHours = Math.floor(appTimeSeconds / 3600)
@@ -350,7 +368,36 @@ export default function Dashboard({ embedded = false }) {
               Mapa de Calor (90 días)
             </div>
 
-            <div style={{ overflowX: 'auto', paddingBottom: 8 }} className="custom-scrollbar">
+            <div
+              ref={heatmapRef}
+              style={{ overflowX: 'auto', paddingBottom: 8, position: 'relative' }}
+              className="custom-scrollbar"
+              onMouseLeave={() => setHeatTooltip(null)}
+            >
+              {/* Tooltip */}
+              {heatTooltip && (
+                <div style={{
+                  position: 'absolute',
+                  left: heatTooltip.x,
+                  top: heatTooltip.y - 58,
+                  transform: 'translateX(-50%)',
+                  background: '#18181b',
+                  color: '#f0ede8',
+                  borderRadius: 8,
+                  padding: '8px 12px',
+                  fontSize: 12,
+                  pointerEvents: 'none',
+                  zIndex: 100,
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  lineHeight: 1.5
+                }}>
+                  <div style={{ fontWeight: 600 }}>{heatTooltip.dateLabel}</div>
+                  <div style={{ opacity: 0.75 }}>{heatTooltip.countLabel}</div>
+                </div>
+              )}
+
               <div style={{
                 display: 'grid',
                 gridTemplateRows: 'repeat(7, 1fr)',
@@ -369,6 +416,26 @@ export default function Dashboard({ embedded = false }) {
                         background: style.bg, border: style.border,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         transition: 'opacity 0.2s', cursor: 'default'
+                      }}
+                      onMouseEnter={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const containerRect = heatmapRef.current?.getBoundingClientRect()
+                        if (containerRect) showHeatTooltip(day, rect, containerRect)
+                      }}
+                      onTouchStart={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const containerRect = heatmapRef.current?.getBoundingClientRect()
+                        longPressTimer.current = setTimeout(() => {
+                          if (containerRect) showHeatTooltip(day, rect, containerRect)
+                        }, 400)
+                      }}
+                      onTouchEnd={() => {
+                        clearTimeout(longPressTimer.current)
+                        setTimeout(() => setHeatTooltip(null), 1200)
+                      }}
+                      onTouchCancel={() => {
+                        clearTimeout(longPressTimer.current)
+                        setHeatTooltip(null)
                       }}
                     >
                       {style.legendary && (
