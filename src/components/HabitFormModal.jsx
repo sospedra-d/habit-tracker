@@ -92,7 +92,7 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
   return (
     <div className="modal-overlay">
       <div className="modal-backdrop" onClick={onClose} />
-        <div className="modal-content animate-fade-in-up" style={{ maxHeight: '90dvh', overflowY: 'auto' }}>
+        <div className="modal-content animate-fade-in-up">
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text1)' }}>
