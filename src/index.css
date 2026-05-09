@@ -505,8 +505,7 @@ body {
 }
 .modal-content {
   position: relative;
-  width: 100%;
-  max-width: 420px;
+  width: min(90vw, 480px);
   max-height: calc(100vh - 48px);
   overflow-y: auto;
   background: var(--surface);
