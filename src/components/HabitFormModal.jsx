@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 const DAY_LABELS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
 const CATEGORIES = ['Salud', 'Productividad', 'Ejercicio', 'Estudios', 'Otro']
@@ -27,6 +27,17 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
   const [challengeActive, setChallengeActive] = useState(false)
   const [challengeDays, setChallengeDays] = useState(21)
   const [saving, setSaving] = useState(false)
+  const nameInputRef = useRef(null)
+
+  // Scroll name input into view when modal opens (fixes mobile keyboard pushing content off-screen)
+  useEffect(() => {
+    if (isOpen && nameInputRef.current) {
+      const timer = setTimeout(() => {
+        nameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 150)
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen])
 
   useEffect(() => {
     if (editingHabit) {
@@ -81,7 +92,7 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
   return (
     <div className="modal-overlay">
       <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-content animate-fade-in-up">
+        <div className="modal-content animate-fade-in-up" style={{ maxHeight: '90dvh', overflowY: 'auto' }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text1)' }}>
@@ -93,8 +104,12 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {/* Name */}
           <input
+            ref={nameInputRef}
             type="text" value={name} onChange={(e) => setName(e.target.value)}
             placeholder="Nombre del hábito..." autoFocus style={inputStyle}
+            onFocus={() => {
+              setTimeout(() => nameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+            }}
           />
 
           {/* Core toggle */}
