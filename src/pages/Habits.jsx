@@ -510,7 +510,9 @@ export default function Habits() {
       )}
 
       {/* FAB for new habit */}
-      <button className="fab" onClick={() => { setEditingHabit(null); setModalOpen(true) }}>+</button>
+      {!selectedCategory && (
+        <button className="fab" onClick={() => { setEditingHabit(null); setModalOpen(true) }}>+</button>
+      )}
 
       {/* Modal */}
       <HabitFormModal
