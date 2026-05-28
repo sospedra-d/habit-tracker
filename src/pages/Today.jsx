@@ -26,7 +26,7 @@ export default function Today() {
   const [loading, setLoading] = useState(true)
   const [todos, setTodos] = useState([])
   const [completedTodosCount, setCompletedTodosCount] = useState(0)
-  const [pomodoroSessions, setPomodoroSessions] = useState(0)
+  const [focusProductivity, setFocusProductivity] = useState(0)
   const [habits, setHabits] = useState([])
   const [habitLogs, setHabitLogs] = useState([])
   const [challengeLogs, setChallengeLogs] = useState([])
@@ -75,15 +75,15 @@ export default function Today() {
         .gte('completed_at', todayStart)
       setCompletedTodosCount(count || 0)
 
-      // Fetch today's completed pomodoro sessions (focus only)
-      const { data: pomoData, error: pomoErr } = await supabase
-        .from('pomodoro_logs')
-        .select('id')
-        .gte('completed_at', `${todayStr}T00:00:00Z`)
-        .lte('completed_at', `${todayStr}T23:59:59Z`)
-      if (pomoErr) console.error('Pomodoro fetch error:', pomoErr)
-      setPomodoroSessions(pomoData?.length || 0)
-      console.log('[Today] Pomodoro sessions today:', pomoData?.length)
+      // Fetch today's focus sessions — 1 productivity unit per 10min
+      const { data: focusData, error: focusErr } = await supabase
+        .from('focus_sessions')
+        .select('duration_seconds')
+        .eq('date', todayStr)
+      if (focusErr) console.error('Focus fetch error:', focusErr)
+      const totalFocusSeconds = (focusData || []).reduce((acc, s) => acc + s.duration_seconds, 0)
+      setFocusProductivity(Math.floor(totalFocusSeconds / 600)) // 1 unit per 10min
+      console.log('[Today] Focus productivity units:', Math.floor(totalFocusSeconds / 600))
 
       const { data: hData } = await supabase.from('habits').select('*')
       setHabits(hData || [])
@@ -200,7 +200,7 @@ export default function Today() {
       }
       setChallengeLogs(allChallengeLogs)
 
-      // Auto-deactivation (24h expired) and auto-completion
+      // Auto-deactivation (48h sin completar tras fallo) and auto-completion
       const deactivateIds = []
       const completedChallenges = []
 
@@ -366,10 +366,9 @@ export default function Today() {
       }
 
       if (habit.is_counter && isCompleted) {
-        // Undo counter habit
+        // Undo counter habit — refetch completo para recalcular racha desde BD
         await supabase.from('habit_logs').delete().eq('habit_id', habit.id).eq('completed_at', todayStr)
-        setHabitLogs(prev => prev.filter(l => l.habit_id !== habit.id))
-        setChallengeLogs(prev => prev.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr))
+        await fetchData()
         return
       }
 
@@ -385,11 +384,11 @@ export default function Today() {
         }
       }
 
-      const checkChallenge = () => {
+      const checkChallenge = (updatedLogs) => {
         if (habit.challenge_active && !didRestartChallenge) {
-          const status = getChallengeStatus(habit, challengeLogs, todayStr)
-          const newStreak = status.streak + 1
-          if (newStreak >= habit.challenge_days) {
+          // Recalcular con los logs actualizados (incluyendo el log de hoy recién insertado)
+          const status = getChallengeStatus(habit, updatedLogs, todayStr)
+          if (status.isCompleted) {
             handleChallengeCompletion(habit)
             return true
           }
@@ -402,20 +401,23 @@ export default function Today() {
           .upsert([{ habit_id: habit.id, count: 1, completed_at: todayStr }], { onConflict: 'habit_id, completed_at' }).select()
         if (data) {
           setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
-          setChallengeLogs(prev => [...prev.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), data[0]])
+          const updatedChallengeLogs = [...challengeLogs.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), data[0]]
+          setChallengeLogs(updatedChallengeLogs)
         }
       } else {
         const nextCount = current + 1
         const willCompleteCounter = nextCount >= target
         const { data } = await supabase.from('habit_logs')
           .upsert([{ habit_id: habit.id, count: nextCount, completed_at: todayStr }], { onConflict: 'habit_id, completed_at' }).select()
+        let updatedChallengeLogs = challengeLogs
         if (data) {
           setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
-          setChallengeLogs(prev => [...prev.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), data[0]])
+          updatedChallengeLogs = [...challengeLogs.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), data[0]]
+          setChallengeLogs(updatedChallengeLogs)
         }
         if (willCompleteCounter) {
           if (navigator.vibrate) navigator.vibrate(50)
-          const completedChallenge = checkChallenge()
+          const completedChallenge = checkChallenge(updatedChallengeLogs)
           setCelebratingIds(prev => new Set([...prev, habit.id]))
           setTimeout(() => setCelebratingIds(prev => { const n = new Set(prev); n.delete(habit.id); return n }), 700)
           setFadingHabits(prev => new Set([...prev, habit.id]))
@@ -429,7 +431,8 @@ export default function Today() {
 
       if (willComplete) {
         if (navigator.vibrate) navigator.vibrate(50)
-        const completedChallenge = checkChallenge()
+        const updatedChallengeLogs = [...challengeLogs.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), { habit_id: habit.id, completed_at: todayStr, count: 1 }]
+        const completedChallenge = checkChallenge(updatedChallengeLogs)
         setCelebratingIds(prev => new Set([...prev, habit.id]))
         setTimeout(() => setCelebratingIds(prev => { const n = new Set(prev); n.delete(habit.id); return n }), 700)
         setFadingHabits(prev => new Set([...prev, habit.id]))
@@ -465,7 +468,7 @@ export default function Today() {
   const displayPct = coreComplete ? 100 + barExtrasPct : barCorePct
   const isLegendary = displayPct >= 200
 
-  const totalProductivity = coreCompleted + extrasCompleted + completedTodosCount + pomodoroSessions
+  const totalProductivity = coreCompleted + extrasCompleted + completedTodosCount + focusProductivity
 
   // Celebrations
   useEffect(() => {

@@ -4,7 +4,7 @@ import { supabase } from './supabaseClient'
 import Login from './pages/Login'
 import DashboardLayout from './layouts/DashboardLayout'
 import Habits from './pages/Habits'
-import Pomodoro from './pages/Pomodoro'
+import Focus from './pages/Focus'
 import DashboardPage from './pages/Dashboard'
 import Todos from './pages/Todos'
 import Today from './pages/Today'
@@ -58,7 +58,7 @@ function App() {
         <Route index element={<Navigate to="/hoy" replace />} />
         <Route path="hoy" element={<Today />} />
         <Route path="habits" element={<Habits />} />
-        <Route path="pomodoro" element={<Pomodoro />} />
+        <Route path="pomodoro" element={<Focus />} />
         <Route path="metas" element={<Goals />} />
         <Route path="estadisticas" element={<DashboardPage />} />
         <Route path="tareas" element={<Todos />} />

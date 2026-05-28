@@ -1,4 +1,24 @@
 /**
+ * Calcula los días de gracia según la duración del reto.
+ * 1-7 días → 0 gracia, 8-21 días → 1 gracia, 22+ días → 2 gracia.
+ */
+function getGraceDays(challengeDays) {
+  if (challengeDays <= 7) return 0
+  if (challengeDays <= 21) return 1
+  return 2
+}
+
+/**
+ * Formatea una Date a 'YYYY-MM-DD' sin problemas de zona horaria.
+ */
+function toDateStr(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+/**
  * Calcula el estado del reto de consistencia de un hábito.
  *
  * @param {object} habit - El hábito con challenge_active, challenge_days, challenge_started_at
@@ -7,38 +27,23 @@
  * @returns {object} { isActive, streak, showRedX, isInFailureState, needsDeactivation, isCompleted }
  */
 export function getChallengeStatus(habit, allLogs, todayStr) {
-  if (!habit.challenge_active) {
-    return {
-      isActive: false,
-      streak: 0,
-      showRedX: false,
-      isInFailureState: false,
-      needsDeactivation: false,
-      isCompleted: false
-    }
+  const inactive = {
+    isActive: false,
+    streak: 0,
+    showRedX: false,
+    isInFailureState: false,
+    needsDeactivation: false,
+    isCompleted: false
   }
 
+  if (!habit.challenge_active) return inactive
+
   if (!habit.challenge_started_at) {
-    return {
-      isActive: true,
-      streak: 0,
-      showRedX: false,
-      isInFailureState: false,
-      needsDeactivation: false,
-      isCompleted: false
-    }
+    return { ...inactive, isActive: true }
   }
 
   // --- Fechas clave ---
   const today = new Date(todayStr + 'T00:00:00')
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  const yesterdayStr = yesterday.toISOString().split('T')[0]
-
-  const dayBeforeYesterday = new Date(yesterday)
-  dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 1)
-  const dayBeforeYesterdayStr = dayBeforeYesterday.toISOString().split('T')[0]
-
   const startedAt = new Date(habit.challenge_started_at)
   startedAt.setHours(0, 0, 0, 0)
 
@@ -47,39 +52,98 @@ export function getChallengeStatus(habit, allLogs, todayStr) {
   const completedDates = new Set(habitLogs.map(l => l.completed_at))
 
   const hasLogToday = completedDates.has(todayStr)
-  const hasLogYesterday = completedDates.has(yesterdayStr)
 
-  // --- STREAK ---
-  // Si completado hoy → contar desde hoy hacia atrás
-  // Si NO completado hoy → contar desde ayer hacia atrás
+  // --- Días de gracia ---
+  const graceDaysTotal = getGraceDays(habit.challenge_days)
+
+  // --- CÁLCULO DE RACHA ---
+  // Si hay log hoy → empezar desde hoy
+  // Si NO hay log hoy → empezar desde ayer
+  const startFrom = new Date(today)
+  if (!hasLogToday) {
+    startFrom.setDate(startFrom.getDate() - 1)
+  }
+
   let streak = 0
-  const startFrom = hasLogToday ? new Date(today) : new Date(yesterday)
+  let graceDaysUsed = 0
   let d = new Date(startFrom)
 
   while (d >= startedAt) {
-    const dStr = d.toISOString().split('T')[0]
+    const dStr = toDateStr(d)
     if (completedDates.has(dStr)) {
       streak++
     } else {
-      break
+      // Intentar usar un día de gracia
+      if (graceDaysUsed < graceDaysTotal) {
+        graceDaysUsed++
+        // No suma a la racha pero no la interrumpe → continuar
+      } else {
+        // Sin gracia restante → racha rota
+        break
+      }
     }
     d.setDate(d.getDate() - 1)
   }
 
-  // --- ESTADO FALLO ---
-  // Ayer no tiene log Y el reto empezó en ayer o antes
-  const startedBeforeOrOnYesterday = startedAt <= yesterday
-  const isInFailureState = startedBeforeOrOnYesterday && !hasLogYesterday
+  // --- ESTADO DE FALLO ---
+  // Se activa cuando: mirando desde AYER hacia atrás, la racha se rompe
+  // (es decir, ayer no tiene log Y se agotaron los días de gracia mirando hacia atrás desde ayer)
+  // Esto es independiente de si hay log hoy o no.
+  let isInFailureState = false
+
+  // Solo puede haber fallo si el reto empezó antes de hoy
+  if (startedAt < today) {
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayStr = toDateStr(yesterday)
+
+    if (!completedDates.has(yesterdayStr)) {
+      // Ayer no tiene log → verificar si los días de gracia alcanzan mirando atrás desde ayer
+      let graceCheck = 0
+      let checkDate = new Date(yesterday)
+
+      // Recorrer hacia atrás desde ayer buscando si la racha ya estaba rota
+      while (checkDate >= startedAt) {
+        const checkStr = toDateStr(checkDate)
+        if (!completedDates.has(checkStr)) {
+          graceCheck++
+          if (graceCheck > graceDaysTotal) {
+            isInFailureState = true
+            break
+          }
+        } else {
+          // Encontramos un log → la gracia se usó correctamente, no hay fallo
+          break
+        }
+        checkDate.setDate(checkDate.getDate() - 1)
+      }
+
+      // Si recorrimos hasta antes de startedAt sin encontrar log y gracia agotada
+      if (checkDate < startedAt && graceCheck > graceDaysTotal) {
+        isInFailureState = true
+      }
+    }
+  }
 
   // Mostrar X roja: en estado fallo Y el usuario NO ha completado hoy
+  // (al completar hoy, la X desaparece y el reto se reinicia)
   const showRedX = isInFailureState && !hasLogToday
 
-  // --- DESACTIVACIÓN AUTOMÁTICA ---
-  // Si falta log de ayer Y de anteayer → la ventana de 24h expiró
+  // --- DESACTIVACIÓN AUTOMÁTICA (48h) ---
+  // Si está en estado fallo Y han pasado 2 días sin log (ayer y anteayer no tienen log)
+  // → la ventana de 48h expiró, desactivar reto
   let needsDeactivation = false
-  if (startedBeforeOrOnYesterday && !hasLogYesterday) {
-    const startedBeforeOrOnDBY = startedAt <= dayBeforeYesterday
-    if (startedBeforeOrOnDBY && !completedDates.has(dayBeforeYesterdayStr)) {
+  if (isInFailureState) {
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayStr = toDateStr(yesterday)
+
+    const dayBefore = new Date(today)
+    dayBefore.setDate(dayBefore.getDate() - 2)
+    const dayBeforeStr = toDateStr(dayBefore)
+
+    // Si ni ayer ni anteayer tienen log, y ambos días están dentro del periodo del reto
+    if (!completedDates.has(yesterdayStr) && !completedDates.has(dayBeforeStr) && dayBefore >= startedAt) {
       needsDeactivation = true
     }
   }
@@ -89,7 +153,7 @@ export function getChallengeStatus(habit, allLogs, todayStr) {
 
   return {
     isActive: true,
-    streak,
+    streak: Math.min(streak, habit.challenge_days),
     showRedX,
     isInFailureState,
     needsDeactivation,

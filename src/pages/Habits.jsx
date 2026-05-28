@@ -59,7 +59,7 @@ export default function Habits() {
           .gte('completed_at', oldestDateStr)
         if (!clErr) allChallengeLogs = clData || []
         
-        // Auto-deactivation (24h window expired) and auto-completion
+        // Auto-deactivation (48h sin completar tras fallo) and auto-completion
         const deactivateIds = []
         const completedIds = []
         const { data: { user } } = await supabase.auth.getUser()
