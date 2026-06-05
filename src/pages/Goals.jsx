@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import Dashboard from './Dashboard'
+import useScrollLock from '../hooks/useScrollLock'
 
 const COLORS = ['#3b7ef8','#0d9488','#c9963a','#22c55e','#a855f7','#f97316']
 
@@ -23,6 +24,9 @@ function GoalModal({ open, onClose, onSave }) {
   const [name, setName] = useState('')
   const [color, setColor] = useState(COLORS[0])
   const [saving, setSaving] = useState(false)
+
+  // Lock body scroll while open so iOS can't leave the page cut off after the keyboard closes
+  useScrollLock(open)
 
   if (!open) return null
 
@@ -74,6 +78,9 @@ function MilestoneModal({ open, onClose, onSave }) {
   const [type, setType] = useState('checkbox')
   const [target, setTarget] = useState(1)
   const [saving, setSaving] = useState(false)
+
+  // Lock body scroll while open so iOS can't leave the page cut off after the keyboard closes
+  useScrollLock(open)
 
   if (!open) return null
 

@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { supabase } from '../supabaseClient'
+import useScrollLock from '../hooks/useScrollLock'
 
 export default function TaskFormModal({ isOpen, onClose, onSave }) {
   const [title, setTitle] = useState('')
   const [energy, setEnergy] = useState('low')
   const [date, setDate] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // Lock body scroll while open so iOS can't leave the page cut off after the keyboard closes
+  useScrollLock(isOpen)
 
   const handleSubmit = async (e) => {
     e.preventDefault()

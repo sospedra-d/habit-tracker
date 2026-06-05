@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import useScrollLock from '../hooks/useScrollLock'
 
 const DAY_LABELS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']
 const CATEGORIES = ['Salud', 'Productividad', 'Ejercicio', 'Estudios', 'Otro']
@@ -28,6 +29,9 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
   const [challengeDays, setChallengeDays] = useState(21)
   const [saving, setSaving] = useState(false)
   const nameInputRef = useRef(null)
+
+  // Lock body scroll while open so iOS can't leave the page cut off after the keyboard closes
+  useScrollLock(isOpen)
 
   // Scroll name input into view when modal opens (fixes mobile keyboard pushing content off-screen).
   // 'nearest' only scrolls the modal's own scroll area, never the document body.
