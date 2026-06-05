@@ -9,6 +9,7 @@ import DashboardPage from './pages/Dashboard'
 import Todos from './pages/Todos'
 import Today from './pages/Today'
 import Goals from './pages/Goals'
+import ResetPassword from './pages/ResetPassword'
 
 function ProtectedRoute({ session, children }) {
   const location = useLocation()
@@ -61,23 +62,32 @@ function App() {
     })
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
+      // El enlace de recuperación abre la app con una sesión temporal y dispara
+      // este evento: llevamos al usuario al formulario para fijar la nueva contraseña.
+      if (event === 'PASSWORD_RECOVERY') {
+        navigate('/reset')
+      }
     })
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [navigate])
 
   // Show nothing while checking auth initially to prevent flicker
   if (session === undefined) return null
 
   return (
     <Routes>
-      <Route 
-        path="/login" 
-        element={session ? <Navigate to="/hoy" replace /> : <Login />} 
+      <Route
+        path="/login"
+        element={session ? <Navigate to="/hoy" replace /> : <Login />}
       />
-      
+
+      {/* Página de restablecer contraseña (enlace del email de recuperación).
+          Fuera de ProtectedRoute: gestiona ella misma el caso sin sesión. */}
+      <Route path="/reset" element={<ResetPassword />} />
+
       <Route 
         path="/" 
         element={
