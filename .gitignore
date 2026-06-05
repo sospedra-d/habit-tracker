@@ -5,3 +5,11 @@ dist
 .env.production
 *.local
 .DS_Store
+
+# Local dev/maintenance scripts — contain credentials, must stay out of git
+create_users.mjs
+test_login.mjs
+clear_db.mjs
+
+# Auditoría local: contiene contraseñas en texto plano, no subir
+known_bugs.md
