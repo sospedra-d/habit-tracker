@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 
 export default function NightReflectionModal() {
   const [visible, setVisible] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Once shown / skipped / saved this session, stop re-checking so we don't nag.
+  const handledRef = useRef(false)
 
-  useEffect(() => {
-    checkIfNeeded()
-  }, [])
-
-  const checkIfNeeded = async () => {
+  const checkIfNeeded = useCallback(async () => {
+    if (handledRef.current) return
     try {
       const hour = new Date().getHours()
       if (hour < 21) return // Only show after 21:00
@@ -26,19 +25,31 @@ export default function NightReflectionModal() {
         .eq('date', todayStr)
         .limit(1)
 
-      if (error) {
-        console.log('[Reflection] Table may not exist yet:', error.message)
-        return
-      }
+      if (error) return // table may not exist yet
 
-      // If no reflection today, show modal
+      // Reflection already exists, or we're about to show it → stop checking either way
+      handledRef.current = true
       if (!data || data.length === 0) {
         setVisible(true)
       }
     } catch (err) {
       console.error('[Reflection] Error checking:', err)
     }
-  }
+  }, [])
+
+  // BUG 5.3 FIX: the component never unmounts, so a one-shot check at mount means
+  // opening the app before 21:00 hides the modal forever. Re-check on an interval
+  // and whenever the tab regains focus.
+  useEffect(() => {
+    checkIfNeeded()
+    const interval = setInterval(checkIfNeeded, 5 * 60 * 1000) // every 5 min
+    const onVisibility = () => { if (!document.hidden) checkIfNeeded() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [checkIfNeeded])
 
   const saveMood = async (mood) => {
     setSaving(true)

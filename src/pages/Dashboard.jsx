@@ -106,21 +106,30 @@ export default function Dashboard({ embedded = false }) {
       const oldestDateStr = last90Days[0]
       const todayStr = new Date().toISOString().split('T')[0]
 
-      const { data: hLogs, error: hErr } = await supabase
-        .from('habit_logs')
-        .select('habit_id, completed_at, count')
-        .gte('completed_at', oldestDateStr)
-      if (hErr) throw hErr
-
       const { data: habitsData, error: habErr } = await supabase
         .from('habits')
         .select('id, is_core, days_of_week')
+        .eq('user_id', user.id)
       if (habErr) throw habErr
+
+      // habit_logs has no user_id column → scope through the user's own habit ids
+      const habitIds = (habitsData || []).map(h => h.id)
+      let hLogs = []
+      if (habitIds.length > 0) {
+        const { data: logData, error: hErr } = await supabase
+          .from('habit_logs')
+          .select('habit_id, completed_at, count')
+          .gte('completed_at', oldestDateStr)
+          .in('habit_id', habitIds)
+        if (hErr) throw hErr
+        hLogs = logData || []
+      }
 
       const { data: cTodos, error: tErr } = await supabase
         .from('todos')
         .select('id, created_at, completed_at, is_completed')
         .eq('is_completed', true)
+        .eq('user_id', user.id)
         .gte('created_at', `${oldestDateStr}T00:00:00Z`)
       if (tErr) throw tErr
 
@@ -189,7 +198,8 @@ export default function Dashboard({ embedded = false }) {
       d.setDate(d.getDate() - i)
       const dateStr = d.toISOString().split('T')[0]
       const dayHabitCount = logs.filter(l => l.completed_at === dateStr).length
-      const dayTodoCount = completedTodos.filter(t => t.created_at?.split('T')[0] === dateStr).length
+      // BUG 5.1 FIX: count a todo on the day it was completed, not created
+      const dayTodoCount = completedTodos.filter(t => (t.completed_at || t.created_at)?.split('T')[0] === dateStr).length
       if (dayHabitCount + dayTodoCount >= 5) streak++
       else { if (i === 0) continue; break }
     }

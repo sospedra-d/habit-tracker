@@ -163,7 +163,9 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete, onGoalUpd
     setPoppingId(m.id)
     setTimeout(() => setPoppingId(null), 250)
     const done = !m.is_completed
-    await supabase.from('milestones').update({ is_completed: done, completed_at: done ? new Date().toISOString() : null }).eq('id', m.id)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    await supabase.from('milestones').update({ is_completed: done, completed_at: done ? new Date().toISOString() : null }).eq('id', m.id).eq('user_id', user.id)
     onRefresh()
   }
 
@@ -172,14 +174,18 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete, onGoalUpd
     setTimeout(() => setBouncingId(null), 200)
     const next = Math.max(0, (m.current_count || 0) + delta)
     const done = next >= (m.target_count || 1)
-    await supabase.from('milestones').update({ current_count: next, is_completed: done, completed_at: done ? new Date().toISOString() : (next < (m.target_count||1) ? null : m.completed_at) }).eq('id', m.id)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    await supabase.from('milestones').update({ current_count: next, is_completed: done, completed_at: done ? new Date().toISOString() : (next < (m.target_count||1) ? null : m.completed_at) }).eq('id', m.id).eq('user_id', user.id)
     onRefresh()
   }
 
   const deleteGoal = async () => {
     if (!confirm('¿Eliminar esta meta y todos sus hitos?')) return
     setDeleting(true)
-    await supabase.from('goals').delete().eq('id', goal.id)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setDeleting(false); return }
+    await supabase.from('goals').delete().eq('id', goal.id).eq('user_id', user.id)
     onBack()
   }
 
@@ -191,7 +197,9 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete, onGoalUpd
       return
     }
     setSavingName(true)
-    const { error } = await supabase.from('goals').update({ name: trimmed }).eq('id', goal.id)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSavingName(false); return }
+    const { error } = await supabase.from('goals').update({ name: trimmed }).eq('id', goal.id).eq('user_id', user.id)
     if (!error && onGoalUpdate) onGoalUpdate({ ...goal, name: trimmed })
     setSavingName(false)
     setEditingName(false)
@@ -339,12 +347,9 @@ function LegacySection() {
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { console.log('[Legacy] No user found'); setLoading(false); return }
-      console.log('[Legacy] Fetching achievements for user:', user.id)
+      if (!user) { setLoading(false); return }
       const { data, error } = await supabase.from('achievements').select('*').eq('user_id', user.id).order('achieved_at', { ascending: false })
       if (error) console.error('[Legacy] Error fetching achievements:', error)
-      console.log('[Legacy] All achievements:', data)
-      console.log('[Legacy] habit_challenge entries:', (data || []).filter(a => a.type === 'habit_challenge'))
       setAchievements(data || [])
       setLoading(false)
     })()
@@ -358,9 +363,11 @@ function LegacySection() {
       return
     }
     // Find the goal by name to get its id, then fetch milestones
-    const { data: goals } = await supabase.from('goals').select('id').eq('name', a.name).eq('is_completed', true).limit(1)
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data: goals } = await supabase.from('goals').select('id').eq('user_id', user.id).eq('name', a.name).eq('is_completed', true).limit(1)
     if (goals && goals.length > 0) {
-      const { data: ms } = await supabase.from('milestones').select('*').eq('goal_id', goals[0].id).eq('is_completed', true).order('created_at', { ascending: true })
+      const { data: ms } = await supabase.from('milestones').select('*').eq('user_id', user.id).eq('goal_id', goals[0].id).eq('is_completed', true).order('created_at', { ascending: true })
       setExpandedMilestones(ms || [])
     } else {
       setExpandedMilestones([])
@@ -494,12 +501,14 @@ export default function Goals() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const { data: gData } = await supabase.from('goals').select('*').eq('is_completed', false).order('created_at', { ascending: true })
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setLoading(false); return }
+      const { data: gData } = await supabase.from('goals').select('*').eq('user_id', user.id).eq('is_completed', false).order('created_at', { ascending: true })
       setGoals(gData || [])
 
       if (gData && gData.length > 0) {
         const gids = gData.map(g => g.id)
-        const { data: mData } = await supabase.from('milestones').select('*').in('goal_id', gids).order('created_at', { ascending: true })
+        const { data: mData } = await supabase.from('milestones').select('*').eq('user_id', user.id).in('goal_id', gids).order('created_at', { ascending: true })
         const map = {}
         gids.forEach(id => { map[id] = [] })
         ;(mData || []).forEach(m => {
@@ -532,9 +541,9 @@ export default function Goals() {
     setCompletionPhase('glow')
 
     // Persist to DB
-    await supabase.from('goals').update({ is_completed: true, completed_at: new Date().toISOString() }).eq('id', goalId)
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
+      await supabase.from('goals').update({ is_completed: true, completed_at: new Date().toISOString() }).eq('id', goalId).eq('user_id', user.id)
       await supabase.from('achievements').insert([{ user_id: user.id, type: 'goal', name: goalName, achieved_at: new Date().toISOString() }])
     }
 
@@ -547,7 +556,9 @@ export default function Goals() {
 
   const refreshDetail = useCallback(async () => {
     if (!selectedGoal) return
-    const { data: ms } = await supabase.from('milestones').select('*').eq('goal_id', selectedGoal.id).order('created_at', { ascending: true })
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data: ms } = await supabase.from('milestones').select('*').eq('user_id', user.id).eq('goal_id', selectedGoal.id).order('created_at', { ascending: true })
     setMilestonesMap(prev => ({ ...prev, [selectedGoal.id]: ms || [] }))
   }, [selectedGoal])
 

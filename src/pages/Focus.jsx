@@ -23,8 +23,12 @@ export default function Focus() {
   const [elapsed, setElapsed] = useState(0) // seconds accumulated
   const [isRunning, setIsRunning] = useState(false)
   const [sessionStartedAt, setSessionStartedAt] = useState(null)
+  const sessionStartedAtRef = useRef(null) // mirror of sessionStartedAt, always current
   const timerRef = useRef(null)
   const lastStopRef = useRef(null) // timestamp of last stop
+
+  // Keep the ref in sync so saveSession never reads a stale closure value
+  useEffect(() => { sessionStartedAtRef.current = sessionStartedAt }, [sessionStartedAt])
 
   // Goal
   const [goalHours, setGoalHours] = useState(() => {
@@ -94,7 +98,11 @@ export default function Focus() {
         if (uniqueDates.includes(checkStr)) {
           streak++
         } else {
-          if (i === 0) continue // today hasn't happened yet
+          // BUG 5.5 — "today" is a grace day: the day isn't over, so a missing
+          // session today does NOT break the streak (we keep counting from
+          // yesterday). Completing a session today then adds today on top, so the
+          // displayed number goes e.g. 2 → 3. Any earlier gap (i > 0) ends it.
+          if (i === 0) continue
           break
         }
       }
@@ -113,9 +121,11 @@ export default function Focus() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
+      // BUG 5.4 FIX: read the start time from a ref (not a stale closure capture)
+      // and fall back to "now" computed at invocation time
       await supabase.from('focus_sessions').insert([{
         user_id: user.id,
-        started_at: sessionStartedAt || new Date().toISOString(),
+        started_at: sessionStartedAtRef.current || new Date().toISOString(),
         duration_seconds: durationSec,
         date: todayStr
       }])
@@ -124,7 +134,7 @@ export default function Focus() {
     } catch (err) {
       console.error('Error saving focus session:', err)
     }
-  }, [sessionStartedAt, todayStr, fetchStats])
+  }, [todayStr, fetchStats])
 
   // --- Auto-save check: if stopped for 30+ min, save and reset ---
   useEffect(() => {

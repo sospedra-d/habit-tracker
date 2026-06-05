@@ -43,9 +43,10 @@ export default function Today() {
   const prevCoreCompleteRef = useRef(false)
   const prevLegendaryRef = useRef(false)
   const prevProdRef = useRef(null)
-  const [prodFlip, setProdFlip] = useState(false)
+  const [prodFlip, setProdFlip] = useState(0)
   const [coreStreak, setCoreStreak] = useState(0)
   const [coreStreakRecovery, setCoreStreakRecovery] = useState(false)
+  const [toastMsgs, setToastMsgs] = useState([])
 
   const navigate = useNavigate()
 
@@ -58,13 +59,13 @@ export default function Today() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // BUG 1 FIX: fetch ALL non-completed todos without extra filters
+      // BUG 1 FIX: only the current user's non-completed todos
       const { data: tData, error: tErr } = await supabase
         .from('todos')
         .select('*')
         .eq('is_completed', false)
+        .eq('user_id', user.id)
       if (tErr) console.error('Todos fetch error:', tErr)
-      console.log('[Today] Fetched pending todos:', tData?.length, tData)
       setTodos(tData || [])
 
       const todayStart = `${todayStr}T00:00:00Z`
@@ -72,6 +73,7 @@ export default function Today() {
         .from('todos')
         .select('*', { count: 'exact', head: true })
         .eq('is_completed', true)
+        .eq('user_id', user.id)
         .gte('completed_at', todayStart)
       setCompletedTodosCount(count || 0)
 
@@ -79,17 +81,25 @@ export default function Today() {
       const { data: focusData, error: focusErr } = await supabase
         .from('focus_sessions')
         .select('duration_seconds')
+        .eq('user_id', user.id)
         .eq('date', todayStr)
       if (focusErr) console.error('Focus fetch error:', focusErr)
       const totalFocusSeconds = (focusData || []).reduce((acc, s) => acc + s.duration_seconds, 0)
       setFocusProductivity(Math.floor(totalFocusSeconds / 600)) // 1 unit per 10min
-      console.log('[Today] Focus productivity units:', Math.floor(totalFocusSeconds / 600))
 
-      const { data: hData } = await supabase.from('habits').select('*')
+      const { data: hData } = await supabase.from('habits').select('*').eq('user_id', user.id)
       setHabits(hData || [])
 
-      const { data: hlData } = await supabase.from('habit_logs').select('*').eq('completed_at', todayStr)
-      setHabitLogs(hlData || [])
+      // habit_logs has no user_id column → scope through the user's own habit ids
+      const userHabitIds = (hData || []).map(h => h.id)
+      let hlData = []
+      if (userHabitIds.length > 0) {
+        const { data } = await supabase.from('habit_logs').select('*')
+          .eq('completed_at', todayStr)
+          .in('habit_id', userHabitIds)
+        hlData = data || []
+      }
+      setHabitLogs(hlData)
 
       // ── Global core streak calculation ──
       const coreHabits = (hData || []).filter(h => h.is_core)
@@ -213,23 +223,32 @@ export default function Today() {
         }
       })
 
+      const challengeNotices = []
+
       if (deactivateIds.length > 0) {
-        await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds)
+        await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds).eq('user_id', user.id)
         setHabits(prev => prev.map(h => deactivateIds.includes(h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h))
+        activeChallengeHabits
+          .filter(h => deactivateIds.includes(h.id))
+          .forEach(h => challengeNotices.push(`Reto de "${h.name}" desactivado: 48h sin completar`))
       }
 
       if (completedChallenges.length > 0 && user) {
         for (const h of completedChallenges) {
-          await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id)
+          await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id).eq('user_id', user.id)
           await supabase.from('achievements').insert([{
             user_id: user.id,
             type: 'habit_challenge',
             name: h.name,
             achieved_at: new Date().toISOString()
           }])
+          challengeNotices.push(`🏅 ¡Reto de "${h.name}" completado!`)
         }
         setHabits(prev => prev.map(h => completedChallenges.some(c => c.id === h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h))
       }
+
+      // BUG 5.8 FIX: avisar al usuario cuando un reto se desactiva o se auto-completa
+      if (challengeNotices.length > 0) setToastMsgs(challengeNotices)
 
       // BUG 2 FIX: Only auto-delete completed tasks older than 24h, NOT by due_date
       // (the old logic deleted by due_date which was too aggressive)
@@ -241,6 +260,13 @@ export default function Today() {
   }, [todayStr])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // BUG 5.8 FIX: auto-dismiss the challenge toast
+  useEffect(() => {
+    if (toastMsgs.length === 0) return
+    const t = setTimeout(() => setToastMsgs([]), 4500)
+    return () => clearTimeout(t)
+  }, [toastMsgs])
 
   // --- TODOS: Urgent tasks (≤3 days or overdue) ---
   const hacerAhora = useMemo(() => {
@@ -293,11 +319,14 @@ export default function Today() {
 
   const completeTodo = async (id) => {
     try {
-      // BUG 2 FIX: set completed_at so ✓ Hoy tab can track 24h window
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { alert("Necesitas iniciar sesión"); return }
+      // set completed_at so ✓ Hoy tab can track 24h window
       const { error } = await supabase
         .from('todos')
         .update({ is_completed: true, completed_at: new Date().toISOString() })
         .eq('id', id)
+        .eq('user_id', user.id)
       if (error) { alert("Error: " + error.message); return }
       setCelebratingIds(prev => new Set([...prev, `todo-${id}`]))
       setTimeout(() => {
@@ -312,18 +341,17 @@ export default function Today() {
   // --- HABITS logic ---
   const handleChallengeCompletion = async (habit) => {
     try {
-      setCompletingChallengeIds(prev => new Set([...prev, habit.id]))
-      const { error } = await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', habit.id)
-      if (error) console.error(error)
       const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        await supabase.from('achievements').insert([{
-          user_id: user.id,
-          type: 'habit_challenge',
-          name: habit.name,
-          achieved_at: new Date().toISOString()
-        }])
-      }
+      if (!user) return
+      setCompletingChallengeIds(prev => new Set([...prev, habit.id]))
+      const { error } = await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', habit.id).eq('user_id', user.id)
+      if (error) console.error(error)
+      await supabase.from('achievements').insert([{
+        user_id: user.id,
+        type: 'habit_challenge',
+        name: habit.name,
+        achieved_at: new Date().toISOString()
+      }])
     } catch(err) { console.error(err) }
   }
 
@@ -379,7 +407,7 @@ export default function Today() {
         const status = getChallengeStatus(habit, challengeLogs, todayStr)
         if (status.isInFailureState) {
           // Reiniciar reto: challenge_started_at = now()
-          await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id)
+          await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id).eq('user_id', user.id)
           didRestartChallenge = true
         }
       }
@@ -470,6 +498,15 @@ export default function Today() {
 
   const totalProductivity = coreCompleted + extrasCompleted + completedTodosCount + focusProductivity
 
+  // BUG 5.7 FIX: re-trigger the flip animation on every change, even when the
+  // numeric value repeats (a numeric key reuses the node and skips the anim)
+  useEffect(() => {
+    if (prevProdRef.current !== null && prevProdRef.current !== totalProductivity) {
+      setProdFlip(f => f + 1)
+    }
+    prevProdRef.current = totalProductivity
+  }, [totalProductivity])
+
   // Celebrations
   useEffect(() => {
     if (coreComplete && !prevCoreCompleteRef.current && coreTotal > 0) {
@@ -514,8 +551,9 @@ export default function Today() {
 
   // Helper for focus card date text
   const getDaysLeftText = (dateStr) => {
-    const today = new Date(); today.setHours(0,0,0,0)
     const due = new Date(dateStr + "T00:00:00")
+    if (isNaN(due.getTime())) return ''
+    const today = new Date(); today.setHours(0,0,0,0)
     const diff = Math.ceil((due - today) / (1000 * 60 * 60 * 24))
     if (diff < 0) return `Venció hace ${Math.abs(diff)} días`
     if (diff === 0) return 'Vence hoy'
@@ -531,6 +569,25 @@ export default function Today() {
 
   return (
     <div className="animate-fade-in-up">
+      {/* BUG 5.8 FIX: toast for challenge deactivation / auto-completion */}
+      {toastMsgs.length > 0 && (
+        <div style={{
+          position: 'fixed', left: '50%', bottom: 84, transform: 'translateX(-50%)',
+          zIndex: 9998, display: 'flex', flexDirection: 'column', gap: 8,
+          width: 'calc(100% - 32px)', maxWidth: 360, pointerEvents: 'none'
+        }}>
+          {toastMsgs.map((msg, i) => (
+            <div key={i} style={{
+              background: '#18181b', color: '#f0ede8', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 12, padding: '12px 14px', fontSize: 13, lineHeight: 1.4,
+              boxShadow: '0 6px 24px rgba(0,0,0,0.45)', animation: 'fadeInUp 0.25s ease'
+            }}>
+              {msg}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Header */}
       <div className="screen-header">
         <h1 className="screen-title">Mi Día</h1>
@@ -599,7 +656,7 @@ export default function Today() {
 
             {/* Productivity Card */}
             <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div key={totalProductivity} className={`prod-num anim-flip-in`} style={{ overflow:'hidden' }}>{totalProductivity}</div>
+              <div key={`prod-${prodFlip}`} className={`prod-num anim-flip-in`} style={{ overflow:'hidden' }}>{totalProductivity}</div>
               <div className="prod-phrase">"{getDailyMessage(totalProductivity)}"</div>
             </div>
           </div>

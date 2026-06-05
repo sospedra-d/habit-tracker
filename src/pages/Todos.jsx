@@ -37,9 +37,12 @@ export default function Todos() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
       const { data, error } = await supabase
         .from('todos')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
       if (error) throw error
 
@@ -100,11 +103,15 @@ export default function Todos() {
 
   const toggleComplete = async (todo) => {
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
       const newCompleted = !todo.is_completed
+      // BUG 5.2 FIX: only stamp completed_at when completing; clear it when un-completing
       const { error } = await supabase
         .from('todos')
-        .update({ is_completed: newCompleted, completed_at: new Date().toISOString() })
+        .update({ is_completed: newCompleted, completed_at: newCompleted ? new Date().toISOString() : null })
         .eq('id', todo.id)
+        .eq('user_id', user.id)
       if (error) throw error
       await fetchData()
     } catch (err) { console.error(err) }
@@ -112,10 +119,13 @@ export default function Todos() {
 
   const uncompleteTask = async (todo) => {
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
       const { error } = await supabase
         .from('todos')
-        .update({ is_completed: false })
+        .update({ is_completed: false, completed_at: null })
         .eq('id', todo.id)
+        .eq('user_id', user.id)
       if (error) throw error
       await fetchData()
     } catch (err) { console.error(err) }
@@ -123,7 +133,9 @@ export default function Todos() {
 
   const handleDelete = async (id) => {
     try {
-      const { error } = await supabase.from('todos').delete().eq('id', id)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { error } = await supabase.from('todos').delete().eq('id', id).eq('user_id', user.id)
       if (error) throw error
       setTodos(prev => prev.filter(t => t.id !== id))
       setCompletedTodos(prev => prev.filter(t => t.id !== id))
@@ -133,8 +145,10 @@ export default function Todos() {
   }
 
   const getDaysLeftText = (dateStr) => {
-    const today = new Date(); today.setHours(0,0,0,0)
     const due = new Date(dateStr + "T00:00:00")
+    // BUG 5.6 FIX: avoid rendering "NaNd" when dateStr is malformed
+    if (isNaN(due.getTime())) return ''
+    const today = new Date(); today.setHours(0,0,0,0)
     const diff = Math.ceil((due - today) / (1000 * 60 * 60 * 24))
     if (diff < 0) return `Vencido (${Math.abs(diff)}d)`
     if (diff === 0) return 'Hoy'; if (diff === 1) return 'Mañana'

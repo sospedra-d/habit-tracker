@@ -30,17 +30,28 @@ export default function Habits() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setLoading(false); return }
+
       const { data: allHabits, error: hErr } = await supabase
         .from('habits')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: true })
       if (hErr) throw hErr
 
-      const { data: logs, error: lErr } = await supabase
-        .from('habit_logs')
-        .select('habit_id, count')
-        .eq('completed_at', todayStr)
-      if (lErr) throw lErr
+      // habit_logs has no user_id column → scope through the user's own habit ids
+      const habitIds = (allHabits || []).map(h => h.id)
+      let logs = []
+      if (habitIds.length > 0) {
+        const { data: logData, error: lErr } = await supabase
+          .from('habit_logs')
+          .select('habit_id, count')
+          .eq('completed_at', todayStr)
+          .in('habit_id', habitIds)
+        if (lErr) throw lErr
+        logs = logData || []
+      }
 
       const activeChallengeHabits = (allHabits || []).filter(h => h.challenge_active)
       let allChallengeLogs = []
@@ -51,18 +62,17 @@ export default function Habits() {
         }))
         const safeTs = isNaN(oldestTs) ? Date.now() : oldestTs
         const oldestDateStr = new Date(safeTs).toISOString().split('T')[0]
-        
+
         const { data: clData, error: clErr } = await supabase
           .from('habit_logs')
           .select('habit_id, completed_at, count')
           .in('habit_id', hids)
           .gte('completed_at', oldestDateStr)
         if (!clErr) allChallengeLogs = clData || []
-        
+
         // Auto-deactivation (48h sin completar tras fallo) and auto-completion
         const deactivateIds = []
         const completedIds = []
-        const { data: { user } } = await supabase.auth.getUser()
 
         for (const h of activeChallengeHabits) {
           const status = getChallengeStatus(h, allChallengeLogs, todayStr)
@@ -74,7 +84,7 @@ export default function Habits() {
         }
 
         if (deactivateIds.length > 0) {
-          await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds)
+          await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds).eq('user_id', user.id)
           allHabits.forEach(h => {
             if (deactivateIds.includes(h.id)) {
               h.challenge_active = false
@@ -85,7 +95,7 @@ export default function Habits() {
 
         if (completedIds.length > 0 && user) {
           for (const h of completedIds) {
-            await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id)
+            await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id).eq('user_id', user.id)
             await supabase.from('achievements').insert([{
               user_id: user.id,
               type: 'habit_challenge',
@@ -173,6 +183,7 @@ export default function Habits() {
             challenge_started_at: payload.challenge_started_at
           })
           .eq('id', payload.id)
+          .eq('user_id', user.id)
         if (error) throw error
       } else {
         delete payload.id
@@ -189,7 +200,9 @@ export default function Habits() {
   const handleDelete = async (id) => {
     setDeletingId(id)
     try {
-      const { error } = await supabase.from('habits').delete().eq('id', id)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { error } = await supabase.from('habits').delete().eq('id', id).eq('user_id', user.id)
       if (error) throw error
       await fetchData()
     } catch (err) {
@@ -218,7 +231,10 @@ export default function Habits() {
           const status = getChallengeStatus(habit, challengeLogs, todayStr)
           if (status.isInFailureState) {
             // Reiniciar reto: challenge_started_at = now()
-            await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id)
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) {
+              await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id).eq('user_id', user.id)
+            }
           }
         }
 
