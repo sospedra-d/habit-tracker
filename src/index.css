@@ -38,12 +38,14 @@ body {
   background-color: var(--app-bg);
   color: var(--text1);
   min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* ── Scrollbar ── */
@@ -170,6 +172,7 @@ body {
 /* ── Screen container ── */
 .screen-container {
   min-height: 100vh;
+  min-height: 100dvh;
   padding-bottom: 90px; /* space for bottom nav */
   background: var(--app-bg);
 }
@@ -507,6 +510,7 @@ body {
   position: relative;
   width: min(90vw, 480px);
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border2);

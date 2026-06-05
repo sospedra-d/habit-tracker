@@ -29,11 +29,12 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
   const [saving, setSaving] = useState(false)
   const nameInputRef = useRef(null)
 
-  // Scroll name input into view when modal opens (fixes mobile keyboard pushing content off-screen)
+  // Scroll name input into view when modal opens (fixes mobile keyboard pushing content off-screen).
+  // 'nearest' only scrolls the modal's own scroll area, never the document body.
   useEffect(() => {
     if (isOpen && nameInputRef.current) {
       const timer = setTimeout(() => {
-        nameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        nameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       }, 150)
       return () => clearTimeout(timer)
     }
@@ -108,7 +109,7 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
             type="text" value={name} onChange={(e) => setName(e.target.value)}
             placeholder="Nombre del hábito..." autoFocus style={inputStyle}
             onFocus={() => {
-              setTimeout(() => nameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
+              setTimeout(() => nameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 100)
             }}
           />
 

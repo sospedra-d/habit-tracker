@@ -23,6 +23,37 @@ function App() {
   const [session, setSession] = useState(undefined)
   const navigate = useNavigate()
 
+  // Restore scroll position when the on-screen keyboard closes.
+  // Mobile browsers scroll the document to reveal a focused input but don't
+  // scroll back when the keyboard hides, leaving the screen cut off. We capture
+  // the scroll position when a field is focused and restore it once editing ends.
+  useEffect(() => {
+    const isField = (el) =>
+      el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+    let savedY = null
+
+    const onFocusIn = (e) => {
+      if (isField(e.target) && savedY === null) savedY = window.scrollY
+    }
+    const onFocusOut = (e) => {
+      if (!isField(e.target)) return
+      // Wait a tick: if focus moves to another field, keep editing (keyboard stays).
+      setTimeout(() => {
+        if (!isField(document.activeElement) && savedY !== null) {
+          window.scrollTo(0, savedY)
+          savedY = null
+        }
+      }, 60)
+    }
+
+    document.addEventListener('focusin', onFocusIn)
+    document.addEventListener('focusout', onFocusOut)
+    return () => {
+      document.removeEventListener('focusin', onFocusIn)
+      document.removeEventListener('focusout', onFocusOut)
+    }
+  }, [])
+
   useEffect(() => {
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
