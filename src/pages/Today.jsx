@@ -809,6 +809,11 @@ export default function Today() {
                               )}
                             </span>
                             
+                            {/* M5: detonante */}
+                            {h.cue && (
+                              <span style={{ fontSize: 11, color: 'var(--text3)' }}>🕘 {h.cue}</span>
+                            )}
+
                             {/* Barra dorada + medalla: solo ESTADO NORMAL (sin X, sin completado) */}
                             {(h.challenge_active && status.isActive && !status.showRedX && !isChallengeDone) && (
                               <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -877,6 +882,11 @@ export default function Today() {
                               )}
                             </span>
                             
+                            {/* M5: detonante */}
+                            {h.cue && (
+                              <span style={{ fontSize: 11, color: 'var(--text3)' }}>🕘 {h.cue}</span>
+                            )}
+
                             {/* Barra dorada + medalla: solo ESTADO NORMAL (sin X, sin completado) */}
                             {(h.challenge_active && status.isActive && !status.showRedX && !isChallengeDone) && (
                               <div style={{ marginTop: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>

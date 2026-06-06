@@ -185,7 +185,8 @@ export default function Habits() {
             turno: payload.turno,
             challenge_active: payload.challenge_active,
             challenge_days: payload.challenge_days,
-            challenge_started_at: payload.challenge_started_at
+            challenge_started_at: payload.challenge_started_at,
+            cue: payload.cue
           })
           .eq('id', payload.id)
           .eq('user_id', user.id)
@@ -436,6 +437,11 @@ export default function Habits() {
                         <span style={{ marginLeft: 6, fontSize: 12 }}>{turnoLabel[habit.turno]}</span>
                       )}
                     </span>
+
+                    {/* M5: detonante */}
+                    {habit.cue && (
+                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>🕘 {habit.cue}</span>
+                    )}
 
                     {/* Barra de progreso dorada — solo en ESTADO NORMAL (sin X) */}
                     {(habit.challenge_active && status.isActive && !status.showRedX) && (

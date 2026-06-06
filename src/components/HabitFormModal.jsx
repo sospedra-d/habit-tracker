@@ -9,13 +9,27 @@ const TURNO_OPTIONS = [
   { value: 'noche', label: 'Noche', icon: '🌙' },
 ]
 
+// M15: un color distinto por categoría (antes Salud=Ejercicio y Productividad=Estudios
+// compartían color). Se evita el rojo reservado a "núcleo".
 const CATEGORY_COLORS = {
-  'Salud': '#a1a1aa',
-  'Productividad': '#3b7ef8',
-  'Ejercicio': '#a1a1aa',
-  'Estudios': '#3b7ef8',
-  'Otro': '#52525b',
+  'Salud': '#22c55e',          // verde
+  'Productividad': '#0d9488',  // teal
+  'Ejercicio': '#f97316',      // naranja
+  'Estudios': '#a855f7',       // morado
+  'Otro': '#52525b',           // gris
 }
+
+// M1: plantillas de hábitos populares. Al tocar una, se pre-rellenan los campos del
+// formulario (no toca la BD; el hábito se crea con el "Crear" de siempre).
+// days: 0=Dom … 6=Sáb (coincide con Date.getDay()).
+const HABIT_TEMPLATES = [
+  { emoji: '💧', name: 'Beber agua',    category: 'Salud',         isCounter: true,  target: 8,  days: [0, 1, 2, 3, 4, 5, 6] },
+  { emoji: '🧘', name: 'Meditar',       category: 'Salud',         isCounter: false, target: 1,  days: [0, 1, 2, 3, 4, 5, 6] },
+  { emoji: '📖', name: 'Leer',          category: 'Estudios',      isCounter: true,  target: 10, days: [0, 1, 2, 3, 4, 5, 6] },
+  { emoji: '🏃', name: 'Ejercicio',     category: 'Ejercicio',     isCounter: false, target: 1,  days: [1, 2, 3, 4, 5] },
+  { emoji: '🚶', name: '10.000 pasos',  category: 'Ejercicio',     isCounter: false, target: 1,  days: [0, 1, 2, 3, 4, 5, 6] },
+  { emoji: '🙏', name: 'Gratitud',      category: 'Otro',          isCounter: false, target: 1,  days: [0, 1, 2, 3, 4, 5, 6] },
+]
 
 export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, editingHabit }) {
   const [name, setName] = useState('')
@@ -27,6 +41,7 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
   const [turno, setTurno] = useState('todo')
   const [challengeActive, setChallengeActive] = useState(false)
   const [challengeDays, setChallengeDays] = useState(21)
+  const [cue, setCue] = useState('') // M5: detonante / "¿cuándo lo harás?"
   const [saving, setSaving] = useState(false)
   const nameInputRef = useRef(null)
 
@@ -55,10 +70,12 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
       setTurno(editingHabit.turno || 'todo')
       setChallengeActive(editingHabit.challenge_active || false)
       setChallengeDays(editingHabit.challenge_days || 21)
+      setCue(editingHabit.cue || '')
     } else {
       setName(''); setCategory('Salud'); setSelectedDays([0, 1, 2, 3, 4, 5, 6])
       setIsCounter(false); setIsCore(false); setTargetCount(1); setTurno('todo')
       setChallengeActive(false); setChallengeDays(21)
+      setCue('')
     }
   }, [editingHabit, isOpen])
 
@@ -68,18 +85,32 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
     )
   }
 
+  // M1: vuelca una plantilla en los campos del formulario. El usuario aún revisa y pulsa "Crear".
+  const applyTemplate = (t) => {
+    setName(t.name)
+    setCategory(t.category)
+    setIsCounter(t.isCounter)
+    setTargetCount(t.target || 1)
+    setSelectedDays(t.days)
+    nameInputRef.current?.focus()
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!name.trim() || selectedDays.length === 0) return
     setSaving(true)
+    // M14: nunca guardar un objetivo inválido (vacío, 0, negativo o NaN) → mínimo 1.
+    // Un contador con target 0 rompe el cálculo de progreso (count / 0 → NaN/Infinity).
+    const safeTarget = Math.max(1, Math.floor(Number(targetCount)) || 1)
     await onSave({
       name: name.trim(), category, days_of_week: selectedDays,
       is_counter: isCounter, is_core: isCore,
-      target_count: isCounter ? Number(targetCount) : 1,
+      target_count: isCounter ? safeTarget : 1,
       turno,
       challenge_active: challengeActive,
       challenge_days: challengeActive ? Number(challengeDays) : null,
       challenge_started_at: (challengeActive && !editingHabit?.challenge_active) ? new Date().toISOString() : (challengeActive ? editingHabit?.challenge_started_at : null),
+      cue: cue.trim() || null,
       id: editingHabit?.id
     })
     setSaving(false)
@@ -107,6 +138,30 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* M1: plantillas — solo al crear, no al editar */}
+          {!editingHabit && (
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8, fontWeight: 500 }}>
+                Empieza con una plantilla
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {HABIT_TEMPLATES.map(t => (
+                  <button
+                    key={t.name} type="button" onClick={() => applyTemplate(t)}
+                    style={{
+                      padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 500,
+                      border: '1px solid var(--border)', cursor: 'pointer', transition: 'all 0.2s',
+                      background: 'var(--surface2)', color: 'var(--text2)',
+                      display: 'flex', alignItems: 'center', gap: 5
+                    }}
+                  >
+                    <span style={{ fontSize: 14 }}>{t.emoji}</span>{t.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Name */}
           <input
             ref={nameInputRef}
@@ -221,6 +276,17 @@ export default function HabitFormModal({ isOpen, onClose, onSave, onDelete, edit
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* M5: detonante / intención de implementación */}
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8, fontWeight: 500 }}>
+              ¿Cuándo lo harás? <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(opcional)</span>
+            </div>
+            <input
+              type="text" value={cue} onChange={(e) => setCue(e.target.value)}
+              placeholder="Ej: después de desayunar" style={inputStyle} maxLength={80}
+            />
           </div>
 
           {/* Category */}
