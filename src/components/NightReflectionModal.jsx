@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../supabaseClient'
+import { toDateStr } from '../utils/challenge'
 
 export default function NightReflectionModal() {
   const [visible, setVisible] = useState(false)
@@ -16,7 +17,8 @@ export default function NightReflectionModal() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const todayStr = new Date().toISOString().split('T')[0]
+      // BUG 4 FIX: fecha LOCAL, coherente con el disparador por hora local (>= 21h)
+      const todayStr = toDateStr(new Date())
 
       const { data, error } = await supabase
         .from('daily_reflections')
@@ -55,9 +57,9 @@ export default function NightReflectionModal() {
     setSaving(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user) { setSaving(false); return }
 
-      const todayStr = new Date().toISOString().split('T')[0]
+      const todayStr = toDateStr(new Date())
 
       const { error } = await supabase.from('daily_reflections').insert([{
         user_id: user.id,
@@ -65,12 +67,18 @@ export default function NightReflectionModal() {
         mood
       }])
 
-      if (error) console.error('[Reflection] Error saving:', error)
-    } catch (err) {
-      console.error('[Reflection] Error:', err)
-    } finally {
+      // BUG 6 FIX: si falla, no cerrar el modal como si se hubiera guardado
+      if (error) {
+        console.error('[Reflection] Error saving:', error)
+        alert('No se pudo guardar tu reflexión, inténtalo de nuevo')
+        setSaving(false)
+        return
+      }
       setSaving(false)
       setVisible(false)
+    } catch (err) {
+      console.error('[Reflection] Error:', err)
+      setSaving(false)
     }
   }
 

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import HabitFormModal, { DAY_LABELS, CATEGORY_COLORS } from '../components/HabitFormModal'
-import { getChallengeStatus } from '../utils/challenge'
+import { getChallengeStatus, toDateStr } from '../utils/challenge'
+import useToday from '../hooks/useToday'
 
 export default function Habits() {
   const [habits, setHabits] = useState([])
@@ -18,10 +19,10 @@ export default function Habits() {
   })
   const [selectedCategory, setSelectedCategory] = useState(null)
 
-  const today = new Date()
-  const todayDayIndex = today.getDay()
-  const todayStr = today.toISOString().split('T')[0]
-  const currentHour = today.getHours()
+  // BUG 3+4 FIX: hoy local que avanza al pasar la medianoche (antes: fecha UTC)
+  const todayStr = useToday()
+  const todayDayIndex = new Date(todayStr + 'T00:00:00').getDay()
+  const currentHour = new Date().getHours()
   const currentShift = currentHour < 14 ? 'mañana' : 'noche'
 
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
@@ -55,13 +56,15 @@ export default function Habits() {
 
       const activeChallengeHabits = (allHabits || []).filter(h => h.challenge_active)
       let allChallengeLogs = []
+      // BUG 7 FIX: ids cuyos retos se resetearán, para aplicar el cambio inmutablemente
+      const resetChallengeIds = new Set()
       if (activeChallengeHabits.length > 0) {
         const hids = activeChallengeHabits.map(h => h.id)
         const oldestTs = Math.min(...activeChallengeHabits.map(h => {
           return h.challenge_started_at ? new Date(h.challenge_started_at).getTime() : Date.now()
         }))
         const safeTs = isNaN(oldestTs) ? Date.now() : oldestTs
-        const oldestDateStr = new Date(safeTs).toISOString().split('T')[0]
+        const oldestDateStr = toDateStr(new Date(safeTs))
 
         const { data: clData, error: clErr } = await supabase
           .from('habit_logs')
@@ -84,31 +87,33 @@ export default function Habits() {
         }
 
         if (deactivateIds.length > 0) {
-          await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds).eq('user_id', user.id)
-          allHabits.forEach(h => {
-            if (deactivateIds.includes(h.id)) {
-              h.challenge_active = false
-              h.challenge_started_at = null
-            }
-          })
+          // BUG 6 FIX: solo aplicar en local si la BD confirma
+          const { error: deErr } = await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds).eq('user_id', user.id)
+          if (deErr) console.error('Error desactivando retos:', deErr)
+          else deactivateIds.forEach(id => resetChallengeIds.add(id))
         }
 
         if (completedIds.length > 0 && user) {
           for (const h of completedIds) {
-            await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id).eq('user_id', user.id)
-            await supabase.from('achievements').insert([{
+            const { error: upErr } = await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id).eq('user_id', user.id)
+            if (upErr) { console.error('Error completando reto:', upErr); continue }
+            const { error: achErr } = await supabase.from('achievements').insert([{
               user_id: user.id,
               type: 'habit_challenge',
               name: h.name,
               achieved_at: new Date().toISOString()
             }])
-            h.challenge_active = false
-            h.challenge_started_at = null
+            if (achErr) console.error('Error guardando logro de reto:', achErr)
+            resetChallengeIds.add(h.id)
           }
         }
       }
 
-      setHabits(allHabits || [])
+      // BUG 7 FIX: estado inmutable (antes se mutaban los objetos de allHabits)
+      const nextHabits = (allHabits || []).map(h =>
+        resetChallengeIds.has(h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h
+      )
+      setHabits(nextHabits)
       setLogsMap(new Map((logs || []).map((l) => [l.habit_id, l])))
       setChallengeLogs(allChallengeLogs)
     } catch (err) {
@@ -233,7 +238,9 @@ export default function Habits() {
             // Reiniciar reto: challenge_started_at = now()
             const { data: { user } } = await supabase.auth.getUser()
             if (user) {
-              await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id).eq('user_id', user.id)
+              // BUG 6 FIX: propagar el error al catch de updateLog
+              const { error } = await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id).eq('user_id', user.id)
+              if (error) throw error
             }
           }
         }
@@ -498,12 +505,18 @@ export default function Habits() {
                   overflow: 'hidden'
                 }}
               >
-                {/* Category name */}
-                <div style={{
-                  fontSize: 11, fontWeight: 700, color: 'var(--text3)',
-                  letterSpacing: 1, textTransform: 'uppercase'
-                }}>
-                  {card.name}
+                {/* Category name + punto de color por categoría (M15) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{
+                    width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                    background: CATEGORY_COLORS[card.name] || CATEGORY_COLORS['Otro']
+                  }} />
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, color: 'var(--text3)',
+                    letterSpacing: 1, textTransform: 'uppercase'
+                  }}>
+                    {card.name}
+                  </div>
                 </div>
 
                 {/* Progress count */}

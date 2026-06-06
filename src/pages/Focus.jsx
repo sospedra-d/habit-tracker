@@ -1,15 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
+import { toDateStr } from '../utils/challenge'
+import useToday from '../hooks/useToday'
 
 const GOAL_OPTIONS = [1, 2, 3, 4, 5]
 const AUTO_SAVE_TIMEOUT = 30 * 60 * 1000 // 30 minutes in ms
-
-function toDateStr(date) {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
 
 function fmtDuration(totalSeconds) {
   const h = Math.floor(totalSeconds / 3600)
@@ -47,7 +42,8 @@ export default function Focus() {
   const [weekSeconds, setWeekSeconds] = useState(0)
   const [dayStreak, setDayStreak] = useState(0)
 
-  const todayStr = useMemo(() => toDateStr(new Date()), [])
+  // BUG 3 FIX: hoy local que avanza al pasar la medianoche (antes congelado con useMemo [])
+  const todayStr = useToday()
 
   // --- Fetch stats from Supabase ---
   const fetchStats = useCallback(async () => {

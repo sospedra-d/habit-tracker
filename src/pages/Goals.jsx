@@ -155,7 +155,9 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete, onGoalUpd
   const addMilestone = async (data) => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    await supabase.from('milestones').insert([{ goal_id: goal.id, user_id: user.id, ...data }])
+    // BUG 6 FIX: avisar si no se guarda el hito en vez de fingir éxito
+    const { error } = await supabase.from('milestones').insert([{ goal_id: goal.id, user_id: user.id, ...data }])
+    if (error) { console.error('Error añadiendo hito:', error); alert('No se pudo guardar el hito: ' + error.message); return }
     onRefresh()
   }
 
@@ -165,7 +167,9 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete, onGoalUpd
     const done = !m.is_completed
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    await supabase.from('milestones').update({ is_completed: done, completed_at: done ? new Date().toISOString() : null }).eq('id', m.id).eq('user_id', user.id)
+    // BUG 6 FIX: no refrescar (que revierte) en silencio si la BD falla
+    const { error } = await supabase.from('milestones').update({ is_completed: done, completed_at: done ? new Date().toISOString() : null }).eq('id', m.id).eq('user_id', user.id)
+    if (error) { console.error('Error actualizando hito:', error); return }
     onRefresh()
   }
 
@@ -176,7 +180,9 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete, onGoalUpd
     const done = next >= (m.target_count || 1)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    await supabase.from('milestones').update({ current_count: next, is_completed: done, completed_at: done ? new Date().toISOString() : (next < (m.target_count||1) ? null : m.completed_at) }).eq('id', m.id).eq('user_id', user.id)
+    // BUG 6 FIX: no revertir en silencio si la BD falla
+    const { error } = await supabase.from('milestones').update({ current_count: next, is_completed: done, completed_at: done ? new Date().toISOString() : (next < (m.target_count||1) ? null : m.completed_at) }).eq('id', m.id).eq('user_id', user.id)
+    if (error) { console.error('Error actualizando contador del hito:', error); return }
     onRefresh()
   }
 
@@ -185,7 +191,9 @@ function GoalDetail({ goal, milestones, onBack, onRefresh, onComplete, onGoalUpd
     setDeleting(true)
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setDeleting(false); return }
-    await supabase.from('goals').delete().eq('id', goal.id).eq('user_id', user.id)
+    // BUG 6 FIX: no navegar atrás como si se hubiera borrado si la BD falla
+    const { error } = await supabase.from('goals').delete().eq('id', goal.id).eq('user_id', user.id)
+    if (error) { console.error('Error eliminando meta:', error); alert('No se pudo eliminar la meta: ' + error.message); setDeleting(false); return }
     onBack()
   }
 
@@ -543,8 +551,17 @@ export default function Goals() {
     // Persist to DB
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
-      await supabase.from('goals').update({ is_completed: true, completed_at: new Date().toISOString() }).eq('id', goalId).eq('user_id', user.id)
-      await supabase.from('achievements').insert([{ user_id: user.id, type: 'goal', name: goalName, achieved_at: new Date().toISOString() }])
+      // BUG 6 FIX: si la meta no se marca completada, no fingir éxito (reaparecería como activa)
+      const { error: updErr } = await supabase.from('goals').update({ is_completed: true, completed_at: new Date().toISOString() }).eq('id', goalId).eq('user_id', user.id)
+      if (updErr) {
+        console.error('Error completando meta:', updErr)
+        alert('No se pudo completar la meta, inténtalo de nuevo')
+        setCelebratingId(null)
+        setCompletionPhase(null)
+        return
+      }
+      const { error: achErr } = await supabase.from('achievements').insert([{ user_id: user.id, type: 'goal', name: goalName, achieved_at: new Date().toISOString() }])
+      if (achErr) console.error('Error guardando logro de meta:', achErr)
     }
 
     await new Promise(r => setTimeout(r, 1000))
@@ -563,13 +580,16 @@ export default function Goals() {
   }, [selectedGoal])
 
   const handleManualComplete = useCallback(async (goal) => {
-    runCompletionSequence(goal.id, goal.name)
+    // BUG 7 FIX: await para propagar errores en vez de tragárselos
+    await runCompletionSequence(goal.id, goal.name)
   }, [runCompletionSequence])
 
   const createGoal = async (data) => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    await supabase.from('goals').insert([{ user_id: user.id, ...data }])
+    // BUG 6 FIX: avisar si la meta no se crea en vez de cerrar el modal en silencio
+    const { error } = await supabase.from('goals').insert([{ user_id: user.id, ...data }])
+    if (error) { console.error('Error creando meta:', error); alert('No se pudo crear la meta: ' + error.message); return }
     await fetchData()
   }
 

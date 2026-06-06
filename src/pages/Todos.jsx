@@ -77,8 +77,8 @@ export default function Todos() {
   }, [])
 
   const categorizedTodos = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0]
-    const today = new Date(todayStr + "T00:00:00")
+    // BUG 4 FIX: anclar la ventana de urgencia a la medianoche LOCAL (no fecha UTC)
+    const today = new Date(); today.setHours(0, 0, 0, 0)
     const urgentDate = new Date(today)
     urgentDate.setDate(today.getDate() + 3)
 

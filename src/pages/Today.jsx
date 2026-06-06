@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import { getChallengeStatus } from '../utils/challenge'
+import { getChallengeStatus, toDateStr } from '../utils/challenge'
+import useToday from '../hooks/useToday'
 
 // Frases motivacionales
 const phrases = {
@@ -50,7 +51,8 @@ export default function Today() {
 
   const navigate = useNavigate()
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
+  // BUG 3+4 FIX: fecha local de hoy que avanza al pasar la medianoche
+  const todayStr = useToday()
   const dayOfWeekIndex = new Date(todayStr + "T00:00:00").getDay()
 
   const fetchData = useCallback(async () => {
@@ -68,7 +70,9 @@ export default function Today() {
       if (tErr) console.error('Todos fetch error:', tErr)
       setTodos(tData || [])
 
-      const todayStart = `${todayStr}T00:00:00Z`
+      // BUG 4 FIX: límite = instante UTC de la medianoche LOCAL (no 00:00 UTC)
+      const startLocal = new Date(); startLocal.setHours(0, 0, 0, 0)
+      const todayStart = startLocal.toISOString()
       const { count } = await supabase
         .from('todos')
         .select('*', { count: 'exact', head: true })
@@ -106,7 +110,7 @@ export default function Today() {
       if (coreHabits.length > 0) {
         const ninetyDaysAgo = new Date()
         ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
-        const sinceStr = ninetyDaysAgo.toISOString().split('T')[0]
+        const sinceStr = toDateStr(ninetyDaysAgo)
         const coreIds = coreHabits.map(h => h.id)
 
         const { data: streakLogs } = await supabase
@@ -124,7 +128,7 @@ export default function Today() {
         for (let i = 0; i < 90; i++) {
           const checkDate = new Date(today)
           checkDate.setDate(today.getDate() - i)
-          const checkStr = checkDate.toISOString().split('T')[0]
+          const checkStr = toDateStr(checkDate)
           const checkDow = checkDate.getDay()
 
           // Core habits scheduled for this day
@@ -162,7 +166,7 @@ export default function Today() {
               for (let j = 2; j < 90; j++) {
                 const prevDate = new Date(today)
                 prevDate.setDate(today.getDate() - j)
-                const prevStr = prevDate.toISOString().split('T')[0]
+                const prevStr = toDateStr(prevDate)
                 const prevDow = prevDate.getDay()
                 const prevSched = coreHabits.filter(h => {
                   if (!h.days_of_week) return true
@@ -199,7 +203,7 @@ export default function Today() {
           return h.challenge_started_at ? new Date(h.challenge_started_at).getTime() : Date.now()
         }))
         const safeTs = isNaN(oldestTs) ? Date.now() : oldestTs
-        const oldestDateStr = new Date(safeTs).toISOString().split('T')[0]
+        const oldestDateStr = toDateStr(new Date(safeTs))
         
         const { data: clData, error: clErr } = await supabase
           .from('habit_logs')
@@ -226,25 +230,37 @@ export default function Today() {
       const challengeNotices = []
 
       if (deactivateIds.length > 0) {
-        await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds).eq('user_id', user.id)
-        setHabits(prev => prev.map(h => deactivateIds.includes(h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h))
-        activeChallengeHabits
-          .filter(h => deactivateIds.includes(h.id))
-          .forEach(h => challengeNotices.push(`Reto de "${h.name}" desactivado: 48h sin completar`))
+        // BUG 6 FIX: no mutar el estado local ni avisar si la escritura falla
+        const { error: deErr } = await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).in('id', deactivateIds).eq('user_id', user.id)
+        if (deErr) {
+          console.error('Error desactivando retos:', deErr)
+        } else {
+          setHabits(prev => prev.map(h => deactivateIds.includes(h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h))
+          activeChallengeHabits
+            .filter(h => deactivateIds.includes(h.id))
+            .forEach(h => challengeNotices.push(`Reto de "${h.name}" desactivado: 48h sin completar`))
+        }
       }
 
       if (completedChallenges.length > 0 && user) {
+        const persistedIds = []
         for (const h of completedChallenges) {
-          await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id).eq('user_id', user.id)
-          await supabase.from('achievements').insert([{
+          // BUG 6 FIX: solo marcar completado en local si la BD lo confirma
+          const { error: upErr } = await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', h.id).eq('user_id', user.id)
+          if (upErr) { console.error('Error completando reto:', upErr); continue }
+          const { error: achErr } = await supabase.from('achievements').insert([{
             user_id: user.id,
             type: 'habit_challenge',
             name: h.name,
             achieved_at: new Date().toISOString()
           }])
+          if (achErr) console.error('Error guardando logro de reto:', achErr)
+          persistedIds.push(h.id)
           challengeNotices.push(`🏅 ¡Reto de "${h.name}" completado!`)
         }
-        setHabits(prev => prev.map(h => completedChallenges.some(c => c.id === h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h))
+        if (persistedIds.length > 0) {
+          setHabits(prev => prev.map(h => persistedIds.includes(h.id) ? { ...h, challenge_active: false, challenge_started_at: null } : h))
+        }
       }
 
       // BUG 5.8 FIX: avisar al usuario cuando un reto se desactiva o se auto-completa
@@ -345,13 +361,15 @@ export default function Today() {
       if (!user) return
       setCompletingChallengeIds(prev => new Set([...prev, habit.id]))
       const { error } = await supabase.from('habits').update({ challenge_active: false, challenge_started_at: null }).eq('id', habit.id).eq('user_id', user.id)
-      if (error) console.error(error)
-      await supabase.from('achievements').insert([{
+      if (error) console.error('Error completando reto:', error)
+      // BUG 6 FIX: la medalla es la recompensa del reto; registrar si falla
+      const { error: achErr } = await supabase.from('achievements').insert([{
         user_id: user.id,
         type: 'habit_challenge',
         name: habit.name,
         achieved_at: new Date().toISOString()
       }])
+      if (achErr) console.error('Error guardando logro de reto:', achErr)
     } catch(err) { console.error(err) }
   }
 
@@ -387,15 +405,17 @@ export default function Today() {
 
       // --- DESHACER ---
       if (isCompleted && !habit.is_counter) {
-        await supabase.from('habit_logs').delete().eq('habit_id', habit.id).eq('completed_at', todayStr)
-        // Refetch completo para recalcular racha desde BD
+        // BUG 6 FIX: no refrescar como si se hubiera deshecho si la BD falla
+        const { error } = await supabase.from('habit_logs').delete().eq('habit_id', habit.id).eq('completed_at', todayStr)
+        if (error) { console.error('Error deshaciendo hábito:', error); return }
         await fetchData()
         return
       }
 
       if (habit.is_counter && isCompleted) {
         // Undo counter habit — refetch completo para recalcular racha desde BD
-        await supabase.from('habit_logs').delete().eq('habit_id', habit.id).eq('completed_at', todayStr)
+        const { error } = await supabase.from('habit_logs').delete().eq('habit_id', habit.id).eq('completed_at', todayStr)
+        if (error) { console.error('Error deshaciendo hábito (contador):', error); return }
         await fetchData()
         return
       }
@@ -407,17 +427,19 @@ export default function Today() {
         const status = getChallengeStatus(habit, challengeLogs, todayStr)
         if (status.isInFailureState) {
           // Reiniciar reto: challenge_started_at = now()
-          await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id).eq('user_id', user.id)
-          didRestartChallenge = true
+          // BUG 6 FIX: solo marcar reinicio si la BD lo confirma
+          const { error } = await supabase.from('habits').update({ challenge_started_at: new Date().toISOString() }).eq('id', habit.id).eq('user_id', user.id)
+          if (error) { console.error('Error reiniciando reto:', error) } else { didRestartChallenge = true }
         }
       }
 
-      const checkChallenge = (updatedLogs) => {
+      // BUG 7 FIX: async para poder esperar a que la BD confirme la completación
+      const checkChallenge = async (updatedLogs) => {
         if (habit.challenge_active && !didRestartChallenge) {
           // Recalcular con los logs actualizados (incluyendo el log de hoy recién insertado)
           const status = getChallengeStatus(habit, updatedLogs, todayStr)
           if (status.isCompleted) {
-            handleChallengeCompletion(habit)
+            await handleChallengeCompletion(habit)
             return true
           }
         }
@@ -425,8 +447,10 @@ export default function Today() {
       }
 
       if (!habit.is_counter) {
-        const { data } = await supabase.from('habit_logs')
+        // BUG 6 FIX: no celebrar/ocultar si la escritura falla
+        const { data, error } = await supabase.from('habit_logs')
           .upsert([{ habit_id: habit.id, count: 1, completed_at: todayStr }], { onConflict: 'habit_id, completed_at' }).select()
+        if (error) { console.error('Error guardando hábito:', error); return }
         if (data) {
           setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
           const updatedChallengeLogs = [...challengeLogs.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), data[0]]
@@ -435,8 +459,10 @@ export default function Today() {
       } else {
         const nextCount = current + 1
         const willCompleteCounter = nextCount >= target
-        const { data } = await supabase.from('habit_logs')
+        // BUG 6 FIX: no celebrar/ocultar si la escritura falla
+        const { data, error } = await supabase.from('habit_logs')
           .upsert([{ habit_id: habit.id, count: nextCount, completed_at: todayStr }], { onConflict: 'habit_id, completed_at' }).select()
+        if (error) { console.error('Error guardando contador:', error); return }
         let updatedChallengeLogs = challengeLogs
         if (data) {
           setHabitLogs(prev => [...prev.filter(l => l.habit_id !== habit.id), data[0]])
@@ -445,7 +471,7 @@ export default function Today() {
         }
         if (willCompleteCounter) {
           if (navigator.vibrate) navigator.vibrate(50)
-          const completedChallenge = checkChallenge(updatedChallengeLogs)
+          const completedChallenge = await checkChallenge(updatedChallengeLogs)
           setCelebratingIds(prev => new Set([...prev, habit.id]))
           setTimeout(() => setCelebratingIds(prev => { const n = new Set(prev); n.delete(habit.id); return n }), 700)
           setFadingHabits(prev => new Set([...prev, habit.id]))
@@ -460,7 +486,7 @@ export default function Today() {
       if (willComplete) {
         if (navigator.vibrate) navigator.vibrate(50)
         const updatedChallengeLogs = [...challengeLogs.filter(l => l.habit_id !== habit.id || l.completed_at !== todayStr), { habit_id: habit.id, completed_at: todayStr, count: 1 }]
-        const completedChallenge = checkChallenge(updatedChallengeLogs)
+        const completedChallenge = await checkChallenge(updatedChallengeLogs)
         setCelebratingIds(prev => new Set([...prev, habit.id]))
         setTimeout(() => setCelebratingIds(prev => { const n = new Set(prev); n.delete(habit.id); return n }), 700)
         setFadingHabits(prev => new Set([...prev, habit.id]))

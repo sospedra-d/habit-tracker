@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { supabase } from '../supabaseClient'
+import { toDateStr } from '../utils/challenge'
+import useToday from '../hooks/useToday'
 import {
   BarChart,
   Bar,
@@ -10,19 +12,17 @@ import {
   Cell
 } from 'recharts'
 
+// BUG 4 FIX: serializar con fecha LOCAL (toDateStr), no UTC (toISOString)
 const generateDays = (count) => {
   const days = []
   const today = new Date()
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(today)
     d.setDate(today.getDate() - i)
-    days.push(d.toISOString().split('T')[0])
+    days.push(toDateStr(d))
   }
   return days
 }
-
-const STATIC_LAST_7_DAYS = generateDays(7)
-const STATIC_LAST_90_DAYS = generateDays(90)
 
 // ─── Focused Time Tracker (localStorage-based, local only) ───
 const APP_TIME_KEY = 'habit_tracker_app_time'
@@ -36,7 +36,7 @@ function getAppTimeData() {
 }
 
 function addAppTime(seconds) {
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = toDateStr(new Date())
   const data = getAppTimeData()
   data[todayStr] = (data[todayStr] || 0) + seconds
   const keys = Object.keys(data).sort().slice(-7)
@@ -46,7 +46,7 @@ function addAppTime(seconds) {
 }
 
 function getTodayAppTime() {
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = toDateStr(new Date())
   return getAppTimeData()[todayStr] || 0
 }
 
@@ -62,8 +62,10 @@ export default function Dashboard({ embedded = false }) {
   const longPressTimer = useRef(null)
   const heatmapRef = useRef(null)
 
-  const last7Days = STATIC_LAST_7_DAYS
-  const last90Days = STATIC_LAST_90_DAYS
+  // BUG 3+4 FIX: recalcular los rangos de días (locales) al cambiar el día
+  const todayStr = useToday()
+  const last7Days = useMemo(() => generateDays(7), [todayStr])
+  const last90Days = useMemo(() => generateDays(90), [todayStr])
 
   // ─── App Time Tracking ───
   const sessionStartRef = useRef(Date.now())
@@ -104,7 +106,6 @@ export default function Dashboard({ embedded = false }) {
       if (!user) return
 
       const oldestDateStr = last90Days[0]
-      const todayStr = new Date().toISOString().split('T')[0]
 
       const { data: habitsData, error: habErr } = await supabase
         .from('habits')
@@ -130,7 +131,7 @@ export default function Dashboard({ embedded = false }) {
         .select('id, created_at, completed_at, is_completed')
         .eq('is_completed', true)
         .eq('user_id', user.id)
-        .gte('created_at', `${oldestDateStr}T00:00:00Z`)
+        .gte('created_at', new Date(oldestDateStr + 'T00:00:00').toISOString())
       if (tErr) throw tErr
 
       setLogs(hLogs || [])
@@ -141,7 +142,9 @@ export default function Dashboard({ embedded = false }) {
       const todayHabits = (hLogs || []).filter(l => l.completed_at === todayStr)
       setTodayHabitCount(todayHabits.length)
 
-      const todayStart = `${todayStr}T00:00:00Z`
+      // BUG 4 FIX: límite = instante UTC de la medianoche LOCAL
+      const startLocal = new Date(); startLocal.setHours(0, 0, 0, 0)
+      const todayStart = startLocal.toISOString()
       const todayTodos = (cTodos || []).filter(t => {
         const ua = t.completed_at || t.created_at
         return ua >= todayStart
@@ -152,7 +155,7 @@ export default function Dashboard({ embedded = false }) {
     } finally {
       setLoading(false)
     }
-  }, [last90Days])
+  }, [last90Days, todayStr])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -196,10 +199,13 @@ export default function Dashboard({ embedded = false }) {
     for (let i = 0; i < 90; i++) {
       const d = new Date()
       d.setDate(d.getDate() - i)
-      const dateStr = d.toISOString().split('T')[0]
+      const dateStr = toDateStr(d)
       const dayHabitCount = logs.filter(l => l.completed_at === dateStr).length
-      // BUG 5.1 FIX: count a todo on the day it was completed, not created
-      const dayTodoCount = completedTodos.filter(t => (t.completed_at || t.created_at)?.split('T')[0] === dateStr).length
+      // BUG 5.1 + 4 FIX: contar la tarea el día LOCAL en que se completó, no el de creación
+      const dayTodoCount = completedTodos.filter(t => {
+        const ts = t.completed_at || t.created_at
+        return ts && toDateStr(new Date(ts)) === dateStr
+      }).length
       if (dayHabitCount + dayTodoCount >= 5) streak++
       else { if (i === 0) continue; break }
     }
